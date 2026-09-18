@@ -1,0 +1,16 @@
+0.2.0 — 2026-09-18
+
+- Deploy Sapio's ProgramOracle inside x86_64 AWS Nitro Enclaves, using
+  SignProgramV1, bounded inline WASM v1/v2 and a measured pay-at-least/v1
+  interpreter.
+- Recover the BIP32 root through attested KMS ECDH and settings-bound HKDF.
+- Bind the public identity and signing profile to a fresh NSM challenge.
+  Verify against independently trusted measurements, settings and profile.
+- Provide offline program-profile output, pinned EIF/runner builds,
+  restrictive KMS policy generation and deployment/recovery guidance.
+- Include a runnable ProgramClient example demonstrating flexible payments,
+  key-path and script-path signatures, inline predicates and failed requests.
+- Verify signing on native and musl services, signed-document acceptance and
+  rejection cases, and a complete EIF build. See VERIFICATION.txt for evidence.
+- Real Nitro boot, live KMS provisioning and hardware recovery remain
+  unverified; local software checks are not production-custody assurance.

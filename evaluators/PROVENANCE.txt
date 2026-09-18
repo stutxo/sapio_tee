@@ -1,0 +1,29 @@
+Registered evaluator: pay-at-least/v1
+
+Source repository: https://github.com/stutxo/sapio
+Revision: c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
+Artifact path: evaluators/artifacts/pay_at_least.wasm
+Source path: evaluators/pay-at-least/src/lib.rs
+Shared ABI source: evaluators/common.rs
+License: MPL-2.0 (see ../LICENSE)
+
+The 1382-byte pay_at_least.wasm file is copied byte-for-byte from that commit,
+not compiled from the working tree during the enclave build.
+SHA256: 9d3aecb3a85f38fdaeb467e28d11f5e184b92b9a3deef98201e41b4ecfb09ace
+WASM v1 EvaluatorId:
+  c99794a01b53f5d41775d7f01e6d13afa072ab113540109267846af40d159111
+The evaluator ID is a tagged hash of the exact WASM bytes, NOT plain SHA256.
+
+The enclave embeds this module in its executable. Registry changes require
+source changes, a rebuilt measured image, and newly approved measurements and
+program profile. Setup cannot add or replace evaluators. The separate reserved
+inline WASM v1/v2 interpreters accept bounded modules committed by each program
+instance; they do not modify the registry or give modules root-key access.
+
+Predicate encoding:
+- program selector: UTF-8 bytes pay-at-least/v1
+- parameters: minimum_satoshis:u64_le || script_length:u32_le || script bytes
+- witness: selected_output_index:u32_le
+The selected output must pay at least the committed minimum to the exact
+committed script. Its amount and position may vary without changing the program
+instance or funded key. The signed transaction view must be well-formed.

@@ -1,0 +1,49 @@
+[package]
+name = "sapio-tee"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.98.1"
+license = "MPL-2.0"
+repository = "https://github.com/stutxo/sapio_tee"
+description = "Sapio program oracle for AWS Nitro Enclaves"
+
+[features]
+default = []
+# An ephemeral regtest oracle, explicitly excluded from enclave builds.
+local-dev = []
+
+[dependencies]
+anyhow = "1"
+aws-nitro-enclaves-nsm-api = "0.4"
+aws-sdk-kms = "1"
+axum = "0.8"
+base64 = "0.22"
+bitcoin = { version = "=0.32.102", features = ["serde", "rand"] }
+emulator_connect = { package = "ctv_emulators", git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-base = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+hex = "0.4"
+hkdf = "0.12"
+p256 = { version = "0.13", features = ["pkcs8"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time"] }
+tower = { version = "0.5", features = ["limit", "load-shed"] }
+zeroize = "1"
+
+[dev-dependencies]
+wat = "=1.259.0"
+
+[patch.crates-io]
+# Sapio's public Bitcoin fork, including strict Taproot signature/PSBT decoding.
+bitcoin = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
+bitcoin_hashes = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
+miniscript = { git = "https://github.com/sapio-lang/rust-miniscript", rev = "8d2aa4a60979a55f6ecd6222d48f94a482f4a2f6" }
+schemars = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b06d0181a92ce5b4fddd86977f480cb9d086a" }
+schemars_derive = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b06d0181a92ce5b4fddd86977f480cb9d086a" }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"

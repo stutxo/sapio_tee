@@ -1,0 +1,177 @@
+SECURITY BOUNDARY AND LIMITATIONS
+
+Purpose and trusted computing base
+---------------------------------
+The enclave holds a deterministic Sapio program-signing BIP32 root. The parent
+is not supposed to learn the KMS shared secret, HKDF seed, or private root.
+Sapio's ProgramOracle evaluates bounded inline WASM v1/v2 predicates and the
+fixed measured pay-at-least/v1 interpreter before authorizing a program-derived
+signature. Clients still validate signatures and PSBT integrity.
+
+Trusted components include AWS Nitro isolation and NSM attestation, AWS KMS,
+the KMS key and policy history, the administrator, the reviewed enclave image,
+its Linux kernel/supervisor/Rust dependencies, and the client's independent
+attestation verifier, expected program profile, and pinned xpub. This is not
+proof against AWS compromise, CPU side channels, application memory-safety/
+logic defects, malicious builds, or compromised review/verifier environments.
+Wasmer validation, native compilation, metering, crypto imports, and the
+registered interpreter are active parts of the signing trusted computing base.
+
+The production app requires /dev/nsm and locked nonzero PCR0/1/2. It never
+accepts a seed/xpriv import from the parent. Settings are one-time per process;
+publication of settings/root is atomic and signing starts afterward. Restart
+loses RAM and requires the exact recovery settings again. Secret buffers use
+best-effort zeroization, not a guarantee that all dependency/compiler/kernel
+copies are erased. Do not log or export secret values.
+
+KMS and provisioning
+--------------------
+The measured supervisor proxy adds Recipient attestation containing its own
+enclave-generated recipient public key, signs KMS requests using instance-role
+credentials, and unwraps CiphertextForRecipient inside the enclave. The app
+uses loopback port 9999; no host-supplied endpoint or direct plaintext KMS
+fallback is offered. KMS authenticates attestation and returns the shared
+secret encrypted to that recipient key. A host credential alone must not be
+sufficient to get the plaintext shared secret.
+
+The offline policy generator provides explicit attested DeriveSharedSecret
+permission to a specific parent role and global denies for missing or wrong
+PCR0. It gives a separate admin management permissions, not kms:* or a public
+use grant. In a KMS key policy Resource "*" is the key the policy attaches to;
+its ARN input/Id does not prevent an operator attaching it to a different key.
+The generator is not an IAM simulator and cannot inspect existing key use,
+policies, roles, grants, SCPs, instance profiles or a cloud account. Review and
+test the installed policy in your own account. Never weaken conditions merely
+to make a request succeed.
+
+The admin role can replace/remove the deny statements with PutKeyPolicy.
+Policy mutation, role takeover, admin-parent collusion, key deletion, and
+historic derivation before a restrictive policy was installed are outside a
+claim of immutable enclave-only custody. The provided policy grants no
+CreateGrant permission, but existing grants and policy history still warrant
+audit. Explicit Deny wins while present; an administrator can remove it.
+Audit CloudTrail and protect administration separately. The app does not
+verify that policy is immutable or was installed before the selected block.
+
+Agree on a future unpredictable Bitcoin blockhash only AFTER restricting and
+auditing the KMS key, then verify the actual chain, network and confirmations
+independently. The P256 NUMS point derivation avoids a caller choosing a point
+with a known discrete logarithm; do not replace it with scalar*generator from
+a known blockhash scalar. The app checks nonzero input, not blockchain truth.
+A malicious first setup can initialize the wrong settings and cause denial of
+service; the client must compare exact independently agreed settings in the
+attested identity. A running process cannot be reconfigured. No first-write
+API authentication is provided.
+
+What attestation proves, and what it does not
+--------------------------------------------
+A verified NSM document binds SHA256 of exact identity_json UTF-8 bytes and a
+fresh client nonce to the measured image. Independent trust in the AWS root,
+reviewed nonzero PCR0/1/2, time, expected settings and expected signing profile
+is required. Trusting a root certificate, measurement or expected profile
+supplied solely by the parent defeats the check. Generate the profile using
+sapio-tee --program-profile from an independently reviewed build; the verifier
+requires --program-profile and exact agreement with identity.signing. It
+rejects unexpected capabilities even in genuinely signed documents.
+/public-key alone is untrusted. A verified identity supplies an
+xpub that the client must pin independently for subsequent program operations.
+
+PCR0 identifies image bytes, not whether those bytes are safe. It does not
+identify one specific instance, prove single-instance execution, establish
+policy immutability, prove exclusive key custody historically, or validate
+Bitcoin chain membership. Identical admitted images can run concurrently and
+recreate the same root. No anti-cloning, monotonic state or anti-rollback
+service is provided. The deployment policy does not pin PCR3/PCR4/PCR8 and
+must not be described as instance- or image-signing-certificate-bound.
+
+An attestation response does NOT bind a subsequent HTTP/TCP session. There is
+no attested TLS key, channel binding, mutual authentication, or encrypted client
+protocol here. A malicious parent can relay a genuine enclave's attestation.
+Client-side xpub pinning and signature verification still matter. Client
+identity verification is not request authentication or authorization.
+
+The identity protocol is sapio-tee/program-oracle/1. Its signing profile binds
+SignProgramV1, inline v1/v2 reserved ABI IDs, the registered interpreter's
+content-derived ID and ABI, and connection/I/O limits. Friendly evaluator
+names are not semantic commitments. Arbitrary inline predicates within ABI
+and resource bounds need no registry change; adding or replacing a registered
+interpreter requires code/image rebuild, independent review of new PCRs,
+KMS-policy change, and a newly trusted expected profile. No runtime registry
+mutation or root/key export API is supplied.
+
+Parent-visible traffic and availability
+---------------------------------------
+The upstream parent proxy binds ingress on all IPv4 interfaces. The app binds
+enclave loopback, but that does not make the parent listeners private. Operator
+security groups/firewalls must restrict both 8000 and 8367 before launch. The
+first setup API is particularly sensitive. The app's HTTP limits and Sapio's
+request/connection limits are not protection against a hostile parent.
+The deployed program profile admits four connections with a 30-second request
+I/O timeout. Program, preset parameters and witness are each bounded to
+65,536 bytes; the upstream evaluator enforces execution/host-crypto fuel and
+module limits. These are defense in depth, not a hard wall-clock bound on
+native WASM validation or compilation. An asynchronous I/O timeout cannot
+preempt that synchronous work; hostile inputs can still consume resources.
+
+Programs, parameters, witnesses, PSBTs, transaction data, API requests/responses
+and timing are plaintext and visible/modifiable to the parent. Do not claim
+transaction confidentiality.
+An SSH tunnel protects only its network leg; host-terminated TLS would have
+the same limitation. Upstream logs are relayed to the parent even without
+Nitro debug mode. Avoid secret logs. The parent controls routing, DNS, IMDS
+availability, process lifetime and resources: it can drop/replay/reorder
+traffic, front-run setup, starve/kill enclaves, or deny KMS access. Attestation
+and resource limits do not prevent denial of service. A pinned root lets
+clients reject substituted keys/signatures, not force availability.
+
+The KMS/IMDS-only egress manifest is defense in depth, not an exfiltration
+proof: authorized ingress responses are themselves an output channel. No
+public 9999 ingress is configured. The wrapper never enables --debug-mode;
+zero debug PCRs are rejected by the app/verifier and policy input generator.
+
+Recovery and upgrades
+---------------------
+The KMS key is non-exportable; there is no host-side seed backup. Exact full
+ARN, blockhash, network and derivation version plus the same surviving KMS key
+are required for recovery. Preserve the public recovery record, expected
+program profile, xpub, reviewed source/locks/EIF/PCRs and policy history.
+Switching ARN (including a multi-
+region replica), network, key material, hash or derivation changes the root.
+KMS deletion, account loss, permanently lost authorization or an incompatible
+upgrade can make funds unspendable. Policy-admitted old vulnerable images
+remain a recovery/extraction risk. Independent transaction timelocks,
+threshold custodians or recovery paths are deployment decisions, not features
+silently provided by this service.
+
+Reference provenance and verification status
+-------------------------------------------
+Design reference inspected:
+https://github.com/joshdoman/confidential-script-tee/tree/9cf2e868ce99562f5c058f659b671e9ed9df6bb1
+
+Pinned supervisor/KMS proxy and makeAppEif API:
+https://github.com/joshdoman/nix-enclaver/tree/abe3b6ace922685a20f754549f774cae70cf32e7
+
+Its pinned EIF builder dependency:
+https://github.com/monzo/aws-nitro-util/tree/96f3bb204536dce32882a7e4affd6e8cea828b48
+
+Pinned Sapio ProgramOracle dependency:
+https://github.com/stutxo/sapio/tree/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
+Cargo.toml/Cargo.lock also pin the Bitcoin strict-decoding, Miniscript and
+schema dependencies used by that oracle. Read the actual locks when auditing.
+Reference reuse is not a claim that these repositories or this integration
+have received a security audit.
+
+No successful real Nitro boot, live NSM attestation, IAM-policy enforcement or
+KMS derivation test is claimed by this repository's local software checks.
+A successful Nix image build proves packaging, not hardware behavior, policy
+correctness or bit-for-bit reproducibility. Require independently repeated
+build/measurement checks plus live non-debug Nitro setup/sign/restart/recovery
+and negative KMS authorization checks before production use. Do not fabricate
+PCRs, accept all-zero measurements, replace an unavailable toolchain with a
+silent fallback, or interpret a local-dev response as attestation evidence.
+
+Relevant AWS documentation:
+https://docs.aws.amazon.com/kms/latest/developerguide/conditions-attestation.html
+https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-overview.html
+https://docs.aws.amazon.com/kms/latest/APIReference/API_DeriveSharedSecret.html
+https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html

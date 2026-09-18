@@ -1,0 +1,64 @@
+name: Locked Rust and Nitro image build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Check production and local development contracts
+        run: |
+          nix develop --no-update-lock-file -c cargo check --locked --all-targets --no-default-features
+          nix develop --no-update-lock-file -c cargo test --locked --no-default-features
+          nix develop --no-update-lock-file -c cargo test --locked --features local-dev
+      - name: Verify attestation acceptance and rejection cases
+        run: nix develop --no-update-lock-file -c python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Exercise the live program signing protocol
+        run: |
+          nix develop --no-update-lock-file -c cargo build --locked --features local-dev --bin sapio-tee --example program_oracle
+          nix develop --no-update-lock-file -c bash -euo pipefail -c '
+            identity=$(mktemp)
+            target/debug/sapio-tee --local-dev &
+            signer_pid=$!
+            trap "kill $signer_pid; wait $signer_pid || true; rm -f $identity" EXIT
+            for attempt in {1..50}; do
+              if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then break; fi
+              sleep 0.1
+            done
+            curl --fail --silent http://127.0.0.1:8000/public-key >"$identity"
+            target/debug/examples/program_oracle --address 127.0.0.1:8367 --identity "$identity" --allow-local-dev
+          '
+  eif:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate locked flake
+        run: nix flake check --no-build --no-update-lock-file
+      - name: Build musl application and pinned runner
+        run: nix build --no-update-lock-file .#app .#enclaver --no-link
+      - name: Build measured enclave image
+        run: nix build --no-update-lock-file .#eif --out-link result-eif
+      - name: Preserve actual build measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: sapio-tee-x86_64-eif
+          path: |
+            result-eif/*.eif
+            result-eif/pcr.json
+          if-no-files-found: error

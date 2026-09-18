@@ -1,0 +1,9 @@
+/target/
+/result*
+/.local/
+*.eif
+*.pem
+*.key
+.env
+.venv-verifier/
+__pycache__/

@@ -1,0 +1,90 @@
+SOFTWARE VERIFICATION: 2026-09-18 — PROGRAMORACLE 0.2.0
+
+Rust 1.98.1, x86_64 Linux:
+- cargo test --locked --no-default-features: 4 passed.
+- cargo test --locked --features local-dev: 4 passed.
+- cargo clippy --locked --all-targets --all-features -- -D warnings: passed.
+- cargo fmt --all --check: passed.
+- Final fuel-exhaustion example also rebuilt and passed targeted clippy.
+- A transitive proc-macro-error2 2.0.1 dependency emits Cargo's future-Rust
+  incompatibility warning; it is not a failure with the pinned compiler.
+
+Live program services, not mock signers:
+Started the native local-dev executable and a separately built musl local-dev
+executable in isolated Linux user/network namespaces, leaving an unrelated
+host listener on port 8000 untouched. Both used the actual app HTTP interface
+and ProgramOracle TCP service on ports 8000/8367. Their signing profiles agreed
+with independently generated --program-profile output.
+
+Ran the maintained client against EACH service:
+  cargo build --locked --example program_oracle
+  target/debug/examples/program_oracle --address 127.0.0.1:8367 \
+    --identity <that-service-identity.json> --allow-local-dev
+The caller entered the corresponding network namespace with nsenter. All
+funding was synthetic, with no broadcast or Bitcoin consensus-node claim.
+Observed on both native and musl servers:
+- The registered payment interpreter authorized two amounts/output positions
+  under the SAME committed program instance and funding output.
+- Key-path and authenticated script-path signing succeeded at input index 1.
+- Underpayment, redirected recipient, malformed evidence, missing script-path
+  authentication, instance substitution and unknown evaluator were rejected.
+- Inline v1 CTV signed a matching template with native-witness prevouts and
+  rejected a changed output under the original commitment/funding.
+- Inline v2 enforced a committed signed-lock-time predicate, rejected a changed
+  lock time, and failed closed for both a trap and an infinite fuel-consuming
+  loop. These were typed remote rejections, not client transport timeouts.
+- A subsequent valid payment still signed. ProgramClient cryptographically
+  checked every successful signature and preservation of unrelated PSBT fields.
+- Omitting --allow-local-dev caused the client to reject the local identity.
+
+Both supervised services were stopped cleanly after verification. Temporary
+identity files, smoke scripts and the separate musl-smoke symlink were removed.
+Additional native service smoke:
+Health returned 200; repeat setup returned 409; local attestation returned 503;
+a too-short nonce returned 400. Oversized frames closed only the offending
+connection; HTTP health remained ready.
+
+Attestation verifier:
+- nix develop --no-update-lock-file -c python3 -m unittest discover -s tests
+  -p 'test_*.py': 10 passed.
+- Real signed X509/COSE fixtures cover successful verification, payload/xpub
+  substitution, wrong nonce/settings/PCRs, zero pins, stale timestamps and
+  untrusted roots. Cases also reject missing signing profiles, unexpected
+  registries/capabilities, wrong program identity, and malformed expected
+  profiles even when authentically bound.
+- CLI smoke used the production package's offline --program-profile output.
+  A matching signed fixture returned its exact identity. Missing the required
+  profile argument and an unexpected registry failed without printing an
+  identity.
+- Certificates were generated test fixtures, NOT Nitro hardware evidence.
+
+Nix packaging and production boundary:
+- nix flake check --no-build --no-update-lock-file: passed.
+- nix build --no-update-lock-file .#eif --out-link result-eif: passed, including
+  the production musl application and measured rootfs/EIF assembly, with the
+  pinned supervisor, Go init and Linux 6.12.110.
+- nix build --no-update-lock-file .#app --out-link result-app: passed.
+- Packaged production --help and --program-profile ran without NSM. Default
+  startup failed closed without /dev/nsm. --local-dev was rejected.
+- The separate musl smoke build used an override appending --features local-dev
+  to cargoBuildFlags; it was NOT substituted into the production EIF. The
+  normal flake still builds production with --no-default-features.
+- No parent launch, AWS resources or policy changes were performed in this
+  verification.
+- Local production image: result-eif/sapio_tee.eif
+- EIF SHA256:
+  621af08e4c978e55edda4c46f284132306c5bfafd7d05c04f7ba78d7f35971ad
+- Build-emitted PCR0:
+  3df4b9c0a03f57ac8138811065884c8620063334ac6fc501e4397a38bdc916285a11012b7df90bf596a9552d6bc6ca12
+- Build-emitted PCR1:
+  0d106c61b4afc95e0613996089036323cf03256502df0a55884ffc1d7734d9251727f47c15fb036dd040033e22ee46f3
+- Build-emitted PCR2:
+  bbc3fe289b4aa5cb955760d322f7876a695f16f5a2a31cffa52721dbb8f46c55b42b30ba3f66f422ec5056488fcbaad9
+These are observations from this build, NOT independent trust anchors or
+hardware attestation. Rebuild and compare before granting KMS access.
+
+Unexercised hardware/account boundary:
+No real Nitro boot, NSM-signed document, KMS DeriveSharedSecret call, installed
+IAM-policy negative test, or restart-based KMS recovery was performed. Live
+non-debug enclave verification and independent measurement reproduction
+remain prerequisites for production use.

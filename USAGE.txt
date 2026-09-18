@@ -1,0 +1,352 @@
+SAPIO TEE: BUILD, PROVISION, VERIFY, RECOVER
+
+Scope
+-----
+This repository deploys Sapio's full ProgramOracle with inline WASM v1/v2 and
+a fixed measured pay-at-least/v1 registry. The production process runs inside
+an AWS Nitro Enclave. The parent relays traffic and supplies its instance-role
+credentials to the supervisor;
+it never receives an application seed. No script creates EC2, IAM, KMS, or
+network resources. Review SECURITY.txt before putting funds at risk.
+
+Only native x86_64-linux builders and x86_64 Nitro parents are supported. The
+application is compiled for x86_64-unknown-linux-musl with Rust 1.98.1. Do not
+substitute a different Rust version or silently update either lock file.
+Commercial AWS partition (arn:aws), standard regional KMS endpoints, and a
+same-account KMS key / parent IAM role / separate administrator IAM role are
+the supported deployment model. China, GovCloud, FIPS, custom endpoints, and
+cross-account operation are not supplied configurations.
+
+Build
+-----
+Install Nix with nix-command and flakes enabled. From the repository root:
+
+  nix flake check --no-update-lock-file --no-build
+  nix build --no-update-lock-file .#app --out-link result-app
+  nix build --no-update-lock-file .#enclaver --out-link result-runner
+  nix build --no-update-lock-file .#eif --out-link result-eif
+
+The default package is also the EIF. Outputs:
+  app:       bin/sapio-tee and its identical bin/entrypoint copy
+  eif:       sapio_tee.eif, pcr.json, and upstream build log
+  enclaver:  bin/enclaver, the parent runner and proxies
+  rootfs:    the upstream rootfs before the EIF builder adds its Nix closure
+  devShell:  pinned Rust plus native compiler, cmake, clang/libclang and tools
+
+The application build uses Cargo.lock and --no-default-features. The local-dev
+feature is NOT in the EIF. Wasmer executes program predicates; the
+native compiler, cmake and build-host libclang are deliberate requirements,
+not evidence of an ARM cross-build. Git dependencies are fetched at exact
+Cargo.lock revisions. Kernel, supervisor, toolchain and manifest changes can
+change measurements. Keep the source commit, Cargo.lock, flake.lock, EIF, build
+logs, and PCRs together. Builds can be large: upstream compiles a Nitro kernel.
+No byte-for-byte reproducibility or successful Nitro deployment is claimed
+solely because the inputs are pinned. Independently rebuild and compare the
+actual EIF and measurements before admitting an image to your policy.
+
+The flake calls the pinned upstream x86_64 makeAppEif { appPackage; configFile; }
+API. Its monzo EIF builder includes the rootfs Nix closure; do not strip that
+closure (the supervisor startup script references its packaged interpreter).
+Two build-only compatibility adaptations are explicit in flake.nix: the
+pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set,
+and Sapio's tracked evaluators/artifacts are restored beside its vendored
+workspace crates from the exact same Cargo dependency revision. Neither
+adaptation substitutes the signer or attesting proxy.
+The runner must retain its Nix closure on the parent. Use Nix on the parent or
+transfer the closure with Nix tooling; copying a dynamically linked runner
+alone is not a deployment procedure. The standalone EIF can be copied.
+
+CI runs locked production/local-dev Rust checks, signed attestation fixtures,
+the live ProgramClient demonstration, Nix evaluation, actual musl/runner/EIF
+builds, and uploads build-emitted measurements. CI has no AWS credentials and
+does not prove Nitro boot, hardware attestation, IAM enforcement or KMS access.
+
+Prepare the parent and KMS (operator actions, not automated)
+----------------------------------------------------------
+Use an enclave-enabled x86_64 Nitro EC2 instance with sufficient spare whole
+CPU cores and memory. Install nitro-cli and the Nitro driver, configure access
+to /dev/nitro_enclaves (normally the ne group), and configure the allocator in
+/etc/nitro_enclaves/allocator.yaml. Set cpu_count and memory_mib for the requested
+resources; enable/start nitro-enclaves-allocator.service yourself. The launcher
+checks the CLI, device access and service, but does not reserve resources or
+rewrite the allocator. Actual free capacity is checked by nitro-cli at launch.
+See https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html
+
+Restrict parent ports 8000 and 8367 using security groups AND host firewall
+before starting. The pinned host runner binds these ports on 0.0.0.0, not
+loopback. Access for setup must be restricted to the intended operator. There
+is no application authentication or TLS. An SSH tunnel can protect the network
+leg to the parent but cannot hide traffic from a malicious parent.
+
+The parent needs IMDS instance-profile credentials and network access to KMS.
+The measured manifest permits only kms.*.amazonaws.com and 169.254.169.254 for
+egress. It exposes KMS proxy 9999 only inside the enclave, not as host ingress.
+Provide the parent role via the EC2 instance profile, not a static credentials
+file. Review IMDS, routing and proxy requirements of the pinned supervisor.
+
+Have a separate administrator create an AWS-generated asymmetric KMS key with
+KeySpec ECC_NIST_P256 and KeyUsage KEY_AGREEMENT. Do not use a signing key,
+secp256k1 key, symmetric key, alias, exported key material, or a host seed.
+Record the complete immutable key ARN and region. DescribeKey as the admin
+must report the expected key spec, usage, enabled state and AWS_KMS origin.
+
+Measure the exact EIF independently on a trusted machine with nitro-cli:
+
+  nitro-cli describe-eif --eif-path result-eif/sapio_tee.eif
+
+Compare PCR0, PCR1 and PCR2 with the independently built output. Reject all-zero
+measurements; debug enclaves have zero PCRs and are prohibited. Do not accept
+an untrusted parent's pcr.json, describe-eif output, or quoted measurement as
+your only trust anchor. The deployed image and the image you reviewed must
+match. PCR0 alone is used in the KMS policy; clients additionally pin PCR1/2.
+
+Set these shell variables to your real reviewed values (no sample ARN/PCR is
+safe to deploy): KEY_ARN, ADMIN_ROLE_ARN, PARENT_ROLE_ARN, PCR0, AWS_REGION.
+Then generate, review and explicitly apply the full policy:
+
+  ./deploy/key-policy.py --key-arn "$KEY_ARN" \
+    --admin-role-arn "$ADMIN_ROLE_ARN" --parent-role-arn "$PARENT_ROLE_ARN" \
+    --pcr0 "$PCR0" --output key-policy.json
+  aws kms put-key-policy --region "$AWS_REGION" --key-id "$KEY_ARN" \
+    --policy-name default --policy file://key-policy.json
+
+Run put-key-policy as the separate administrator. Do not bypass KMS's policy
+lockout safety check. The generator is offline and refuses to overwrite an
+existing output file. Resource "*" in this KMS KEY policy means only the key to
+which it is attached; it is not an IAM policy for all keys. Its Id records the
+supplied key ARN, but does not enforce attachment: always double-check the
+--key-id ARN and region. Every Allow names an explicit role. Wildcard
+principals appear only in Deny statements. The parent can call only attested
+DeriveSharedSecret for this PCR0/P256/ECDH key. Explicit global denies cover
+missing Recipient attestation and other PCR0 values, even if another IAM
+policy or grant tries to allow the operation. There is no broad root-account
+kms:* delegation or CreateGrant permission in the generated policy.
+
+The administrator can change this policy later, disable/delete the key, or
+grant new powers by replacing it. This is not an immutable or trustless KMS
+policy. Keep the admin role inaccessible to the parent and audit policy
+changes. Do not assume that the current policy proves the key was never used
+outside an enclave in the past. To prevent advance derivation, first fix and
+audit the restrictive policy, then agree on a FUTURE unpredictable Bitcoin
+block hash. Wait for that block and an appropriate confirmation depth. Verify
+its chain/network and chronology independently. The application validates a
+nonzero hash, NOT chain membership, confirmations or policy history.
+
+Launch and initialize
+---------------------
+Choose CPU_COUNT (an even number of vCPUs) and MEMORY_MIB explicitly; allocate
+enough for the kernel, supervisor and application. Start the foreground runner:
+
+  ./deploy/run-enclave.py --eif result-eif/sapio_tee.eif \
+    --runner ./result-runner/bin/enclaver \
+    --cpu-count "$CPU_COUNT" --memory-mib "$MEMORY_MIB"
+
+There is no --debug-mode option in this script. The upstream CLI receives
+--eif-file, --manifest-file, --cpu-count and --memory-mb; it has no run
+subcommand. Keep the runner alive. Interrupting it causes upstream enclave
+termination. Do not expose an uninitialized service to untrusted callers.
+The script requires a systemd parent with the standard allocator service.
+
+On the trusted operator machine, set BLOCKHASH to the agreed displayed Bitcoin
+hash, NETWORK to bitcoin/testnet/testnet4/signet/regtest, and API_URL to the
+HTTP endpoint reached through your restricted connection. Produce a permanent
+public recovery record, then initialize once:
+
+  jq -n --arg key_id "$KEY_ARN" --arg blockhash "$BLOCKHASH" \
+    --arg network "$NETWORK" \
+    '{key_id:$key_id,blockhash:$blockhash,network:$network}' > setup.json
+  curl --fail-with-body -H 'Content-Type: application/json' \
+    --data-binary @setup.json "$API_URL/setup" > identity.json
+  curl --fail-with-body "$API_URL/public-key"
+
+POST /setup and GET /public-key return the same object:
+  {"protocol":"sapio-tee/program-oracle/1","mode":"nitro","xpub":"...",
+   "settings":{"key_id":"...","blockhash":"...","network":"..."},
+   "signing":{
+     "protocol":"SignProgramV1",
+     "inline_evaluators":[
+       {"id":"0000000000000000000000000000000000000000000000000000000000000000","wasm_version":1},
+       {"id":"0000000000000000000000000000000000000000000000000000000000000002","wasm_version":2}
+     ],
+     "registered_evaluators":[
+       {"name":"pay-at-least/v1","id":"c99794a01b53f5d41775d7f01e6d13afa072ab113540109267846af40d159111","wasm_version":1}
+     ],
+     "max_connections":4,
+     "request_timeout_secs":30
+   }}
+The ellipses describe response fields, not usable settings or an xpub. signing
+is the complete deployed profile; registered IDs commit exact interpreter
+bytes and ABI, not merely friendly names. The embedded pay_at_least.wasm has
+SHA256 9d3aecb3a85f38fdaeb467e28d11f5e184b92b9a3deef98201e41b4ecfb09ace.
+The root/settings publish atomically and cannot be changed within a process.
+A second setup conflicts with HTTP 409. KMS failure returns 502 and does not
+publish a signer. /health returns 503 until initialized and 200 afterward.
+The ProgramOracle TCP signer starts only after successful setup, on enclave
+loopback port 8367. HTTP binds enclave loopback port 8000. The runner forwards
+both; these are different protocols. Do not POST PSBTs to the HTTP API.
+
+Verify attestation before trusting the xpub
+------------------------------------------
+/public-key is not an authenticated source of an xpub. Create a fresh random
+16..64-byte challenge on the verifier, e.g. a 32-byte nonce:
+
+  NONCE=$(openssl rand -hex 32)
+  jq -n --arg nonce "$NONCE" '{nonce:$nonce}' > challenge.json
+  curl --fail-with-body -H 'Content-Type: application/json' \
+    --data-binary @challenge.json "$API_URL/attestation" > attestation.json
+
+POST /attestation returns {identity_json,document}. document is base64 of the
+NSM COSE attestation. identity_json is the EXACT UTF-8 identity serialization;
+NSM user_data is SHA256 of those bytes, not a reserialized JSON object, and NSM
+nonce is the raw decoded challenge. Attestation is unavailable before setup
+or in local development mode.
+
+Independently review/build the application that corresponds to your expected
+image and generate its signing profile OFFLINE on the trusted machine:
+
+  ./result-app/bin/sapio-tee --program-profile > expected-program-profile.json
+
+This command needs neither /dev/nsm nor AWS credentials and does not initialize
+or expose a private root. Never derive expected capabilities from /public-key
+or the attestation response itself. Independently trust this profile just as
+you trust setup.json and the PCRs; do not run a parent-supplied binary to obtain
+it. Keep it as part of the public deployment/recovery record.
+
+Use an independently trusted AWS Nitro root certificate, not one sent by the
+parent. AWS publishes its root G1 archive at:
+https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip
+Authenticate that source and establish your own root trust procedure; copying
+a certificate from attestation cabundle does not establish trust. Set ROOT_CERT
+to the trusted PEM path, and PCR0, PCR1, PCR2 to reviewed independent values.
+On your trusted verifier:
+
+  python3 -m venv .venv-verifier
+  .venv-verifier/bin/pip install -r requirements-verifier.txt
+  .venv-verifier/bin/python scripts/verify-attestation.py \
+    --response attestation.json --settings setup.json --nonce "$NONCE" \
+    --program-profile expected-program-profile.json \
+    --root-cert "$ROOT_CERT" --pcr0 "$PCR0" --pcr1 "$PCR1" --pcr2 "$PCR2" \
+    > verified-identity.json
+
+The helper verifies the chain, COSE ES384 signature, certificate time, freshness,
+nonzero PCR pins, challenge, exact identity digest, identity protocol,
+production mode, exact expected settings and exact expected signing profile.
+Use a trustworthy verifier clock. Pin the verified xpub in ProgramClient
+independently of later unauthenticated /public-key responses.
+If you already have a recovery xpub, compare it as an additional continuity
+check. An xpub alone does not prove enclave identity; PCRs alone do not specify
+the intended KMS key, blockhash, network, returned xpub or expected capabilities.
+
+Program requests and client
+---------------------------
+Use emulator_connect::program::ProgramClient::new(address, pinned_xpub) and
+client.sign(request).await with a ProgramSigningRequest containing:
+
+  instance:    ProgramInstance { evaluator, program, parameters }
+  input_index: u32 index of the transaction input being authorized
+  witness:     evaluator-specific auxiliary bytes
+  path:        ProgramSpendPath::KeyPath or ScriptPath(exact TapLeafHash)
+  psbt:        emulator_connect::program::PSBT wrapping the transaction's PSBT
+
+The Cargo package is ctv_emulators; its Rust library name is emulator_connect.
+
+For inline execution, ProgramInstance::wasm(module, parameters) selects v1;
+ProgramInstance::wasm_v2(module, parameters) selects v2. The reserved IDs shown
+in the profile permanently select these respective ABIs. For the registered
+pay-at-least/v1 interpreter, ProgramInstance::new uses its exact EvaluatorId,
+program bytes b"pay-at-least/v1", and parameters consisting of minimum sats
+(u64 little-endian), recipient script length (u32 little-endian), then script
+bytes. Its witness is the selected output index (u32 little-endian).
+
+Every prevout must be supplied. The program instance commits the evaluator,
+program and fixed parameters into its derived key. Witnesses supply auxiliary
+evidence, not a way to change those committed semantics. ProgramClient checks
+the returned derived-key signature and preservation of unrelated PSBT fields;
+it does not trust an oracle's success label alone.
+
+The wire request is {"SignProgramV1":{...ProgramSigningRequest fields...}},
+framed by a four-byte big-endian JSON length, at most 1,000,000 JSON bytes.
+Bytes are JSON arrays. The psbt field uses Sapio's PSBT wrapper: four
+big-endian length bytes followed by binary PSBT bytes, all in one JSON array;
+it is not a base64 PSBT string. Prefer ProgramClient rather than hand-building
+this encoding. Responses are SignedV1 or RejectedV1. HTTP 8000 has no signing
+endpoint, and this repository does not provide a general CLI covenant mode.
+
+Arbitrary inline predicates within the supported ABI and resource bounds do
+not require registry changes or an image rebuild. Program, parameter and
+witness bytes are each bounded to 65,536 bytes; WASM execution and host crypto
+share fuel limits. The service admits four connections with a 30-second
+request I/O timeout. Native module validation/compilation is synchronous and
+cannot be preempted by that timeout: this is not a hard CPU deadline.
+Adding/changing a registered evaluator requires changing code/embedded bytes,
+rebuilding the image, independently reviewing new PCRs, updating KMS policy,
+and trusting a new expected profile. No runtime registry upload is offered.
+
+After attestation verification, the demonstration can consume the verified
+identity without any local-development bypass:
+
+  nix develop --no-update-lock-file -c cargo run --locked --example program_oracle -- \
+    --address 127.0.0.1:8367 --identity verified-identity.json
+
+This example uses synthetic funding, exercises ProgramClient signature
+validation, and never broadcasts. It is not a wallet or a funding tool.
+Attestation does NOT bind the subsequent TCP connection and does not encrypt
+or authenticate requests.
+
+Recovery, backups and upgrades
+-----------------------------
+There is no persistent enclave disk or seed export. Every fresh production
+process must be set up again. The same live KMS private key, FULL key ARN,
+blockhash, network and derivation version reconstruct the same HD root. Archive
+setup.json, expected-program-profile.json, verified identity/xpub, reviewed
+PCR0/1/2, source and lock files, EIF and build provenance, current key policy
+and policy audit history. These
+are public recovery parameters; none substitutes for the KMS private key.
+Protect KMS deletion/disable permissions and plan account/access recovery.
+A deleted KMS key or permanent loss of its authorization can strand funds.
+Never request an unattested shared secret or write a seed to the parent to
+"back up" this system. A regional ARN is part of the derivation, so switching
+to a multi-region replica ARN does NOT preserve this root even if key material
+is shared. Using an alias or a replacement key also does not recover it.
+
+Derivation version 1: h is the block hash's 32 consensus/internal-order bytes
+(the reverse of its displayed hex). Starting at counter 0, interpret
+SHA256("sapio-tee/p256-nums/v1" || h || u32be(counter)) as the x-coordinate
+of a P256 point with even y (SEC1 prefix 0x02); retry if invalid. KMS performs
+ECDH with that point's SPKI DER. The 32-byte shared secret feeds HKDF-SHA256,
+salt "sapio-tee/root-extract/v1", info "sapio-tee/bip32-root/v1" ||
+u32be(UTF8 ARN length) || UTF8 ARN || h || network byte. Network bytes are
+bitcoin=0, testnet=1, testnet4=2, signet=3, regtest=4. Expand 64 bytes and use
+BIP32 new_master(network, seed). Preserve these domain labels and byte order.
+A change to this derivation is a new root, not an in-place software upgrade.
+
+An image upgrade needs independent review and new measured PCR pins plus a
+conscious key-policy change. Simply adding an Allow for a new PCR will not
+override the generated global Deny. Keep every allowed recovery image safe:
+a vulnerable older image still admitted by policy can compromise the root.
+PCR0 does not bind the one-time settings; clients must verify them separately.
+
+Local verification (not enclave evidence)
+----------------------------------------
+For software-only development, run on an ordinary x86_64 Linux workstation:
+
+  nix develop --no-update-lock-file -c cargo test --locked --no-default-features
+  nix develop --no-update-lock-file -c cargo test --locked --features local-dev
+  nix develop --no-update-lock-file -c python3 -m unittest discover -s tests -p 'test_*.py'
+  nix develop --no-update-lock-file -c cargo run --locked --features local-dev -- --local-dev
+
+From a second terminal:
+
+  curl --fail http://127.0.0.1:8000/health
+  curl --fail http://127.0.0.1:8000/public-key > local-identity.json
+  nix develop --no-update-lock-file -c cargo run --locked --example program_oracle -- \
+    --address 127.0.0.1:8367 --identity local-identity.json --allow-local-dev
+
+The explicit local-only flag permits the unattested identity. Local mode creates
+an ephemeral random regtest root, reports mode "local-dev" and settings null,
+never calls AWS, and returns 503 for attestation. The root changes on restart.
+Do not use it for funds or accept local identity as production evidence. No
+argument defaults production into this mode; production requires /dev/nsm and
+nonzero locked PCR0/1/2. Local success is not an EIF boot, NSM, KMS policy or
+real-Nitro test. Hardware verification must include setup, challenge validation,
+program signing, restart/recovery and rejection of unattested/wrong-PCR KMS use.
