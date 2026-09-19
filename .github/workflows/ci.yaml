@@ -12,7 +12,7 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
       - uses: cachix/install-nix-action@v31
         with:
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Reclaim runner disk for the enclave image build
         run: |
           sudo apt-get clean
@@ -76,7 +76,7 @@ jobs:
       - name: Build measured enclave image
         run: nix build --no-update-lock-file .#eif .#enclave-kernel --out-link result-eif
       - name: Preserve actual build measurements
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sapio-tee-aarch64-eif
           path: |

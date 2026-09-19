@@ -1,3 +1,28 @@
+SOFTWARE VERIFICATION: 2026-09-19 — AARCH64 EIF BUILD AND CI
+
+Local x86_64-linux build host, cross-compiled aarch64 outputs:
+- nix flake check --no-build --no-update-lock-file: passed.
+- nix build --no-update-lock-file .#eif .#enclaver .#app: passed.
+- readelf: sapio-tee, entrypoint, enclaver, odyn, busybox all
+  "Machine: AArch64", fully static (no PT_INTERP).
+- Kernel installs as Image with the ARM64 "ARM\x64" boot magic at 0x38;
+  carried config has NSM, VIRTIO_MMIO, VIRTIO_VSOCKETS, VSOCKETS,
+  SERIAL_8250_CONSOLE built in (=y).
+- Rootfs carries /lib/ld-musl-aarch64.so.1.
+- EIF emitted: sapio_tee.eif (105,884,643 bytes) plus pcr.json and log.txt.
+
+CI (run 35451306747, ubuntu-24.04):
+- Rust contract checks, attestation fixtures, and the live signing protocol
+  passed on the native x86_64 toolchain.
+- The aarch64 musl app, aarch64 parent runner, kernel, and measured EIF build
+  passed in CI; artifact sapio-tee-aarch64-eif uploaded.
+- Reproducibility: the CI EIF is bit-identical to the local build and the
+  CI pcr.json matches the local one exactly (deterministic across machines).
+
+Unexercised hardware/account boundary unchanged (see below): no aarch64
+Nitro boot has been performed; PCRs above are builder measurements, not
+hardware evidence.
+
 SOFTWARE VERIFICATION: 2026-09-18 — PROGRAMORACLE 0.2.0
 
 Rust 1.98.1, x86_64 Linux:
