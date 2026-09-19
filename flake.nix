@@ -244,7 +244,10 @@
         };
         devShells.default = pkgs.mkShell {
           packages = nativeTools ++ [
-            toolchain pkgs.stdenv.cc pkgs.curl pkgs.jq
+            (toolchain.override {
+              targets = [ "aarch64-unknown-linux-musl" "wasm32-unknown-unknown" ];
+            })
+            pkgs.stdenv.cc pkgs.curl pkgs.jq
             (pkgs.python3.withPackages (ps: [ ps.cbor2 ps.cryptography ps.pyopenssl ]))
             pkgs.openssl pkgs.cacert pkgs.git
           ];

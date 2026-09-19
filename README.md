@@ -64,6 +64,49 @@ The two accepted transactions are alternatives spending the **same funding outpu
 
 The example also exercises authenticated script-path signing, a nonzero selected input, inline CTV, a WASM v2 lock-time predicate, traps, fuel exhaustion, and successful signing after rejected requests. Run it with the two-terminal quick start above; it prints a `PASS` line for each observed behavior and exits nonzero on failure. Funding is synthetic: nothing is broadcast and no AWS credentials are needed for local mode.
 
+### Example: a source-built withdrawal vault
+
+The [`vault` example](examples/vault/main.rs) shows the full path from a Rust
+predicate to a compiled Sapio contract and a remotely signed, finalized PSBT:
+
+- [`predicate.rs`](examples/vault/predicate.rs): the Rust code compiled to inline
+  WASM. It requires one input, one output, the committed destination, and a fee
+  no greater than the committed cap.
+- [`contract.rs`](examples/vault/contract.rs): the small `#[sapio::contract]`
+  wrapper that commits the WASM and parameters through `EmulatedProgram`.
+- [`main.rs`](examples/vault/main.rs): client-side compilation, synthetic funding,
+  `prepare_program_request`, `ProgramClient`, and Miniscript finalization.
+
+With the local signer and identity from the quick start:
+
+```sh
+nix develop --no-update-lock-file -c cargo run --locked --example vault -- \
+  --address 127.0.0.1:8367 --identity local-identity.json --allow-local-dev
+```
+
+It accepts 500-sat and 1,000-sat fees, rejects excessive fees, redirection,
+extra inputs/outputs, unexpected evidence and policy substitution, then signs
+a valid sweep again. The same program commitment and funding are retained for
+the predicate comparisons. Nothing is broadcast.
+
+**This is a permissionless fixed-recipient sweep, not a recovery vault.**
+Anyone can trigger an allowed withdrawal. There is no owner authorization,
+timelock, recovery path, change output or partial withdrawal. Do not fund the
+disposable example addresses.
+
+The checked-in `vault.wasm` lets the client run without rebuilding the guest.
+To verify its source/artifact correspondence:
+
+```sh
+nix develop --no-update-lock-file -c bash examples/vault/build.sh --check
+```
+
+After deliberately editing the predicate, use `--write` to rebuild the artifact.
+Changing its bytes or parameters changes the program-derived key; it does not
+update an already funded contract. See [provenance and encoding](examples/vault/PROVENANCE.txt).
+CI checks the exact WASM bytes and runs both signing examples. This inline
+program needs no registry change or enclave redeployment.
+
 ## Build the Nitro image
 
 ```sh

@@ -32,6 +32,8 @@ tower = { version = "0.5", features = ["limit", "load-shed"] }
 zeroize = "1"
 
 [dev-dependencies]
+miniscript = { version = "=13.1.0", features = ["compiler", "serde"] }
+sapio = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
 wat = "=1.259.0"
 
 [patch.crates-io]

@@ -4,6 +4,10 @@
 //! example checks its protocol/profile, but does NOT verify Nitro COSE evidence.
 //! It never fetches an identity from the endpoint or derives an oracle secret.
 
+mod support;
+
+use support::{load_identity, options};
+
 use anyhow::{bail, ensure, Context, Result};
 use bitcoin::bip32::Xpub;
 use bitcoin::blockdata::opcodes::all::OP_CHECKSIG;
@@ -12,127 +16,15 @@ use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::taproot::{LeafVersion, TapLeafHash, TaprootBuilder};
-use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid};
 use emulator_connect::program::{
     ProgramClient, ProgramClientError, ProgramSigningRequest, ProgramSpendPath, PSBT,
 };
 use sapio_base::program::{ctv_wasm_instance, EvaluatorId, ProgramInstance};
 use sapio_base::{CTVHash, Ctv};
-use sapio_tee::deployment::{
-    program_profile, ProgramProfile, IDENTITY_PROTOCOL, PAY_AT_LEAST_SELECTOR, PAY_AT_LEAST_WASM,
-};
-use serde::Deserialize;
-use std::fs::File;
-use std::io::Read;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-
-const MAX_IDENTITY_BYTES: u64 = 64 * 1024;
+use sapio_tee::deployment::{PAY_AT_LEAST_SELECTOR, PAY_AT_LEAST_WASM};
 const MINIMUM: u64 = 9_000;
 const FUNDING: u64 = 20_000;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Identity {
-    protocol: String,
-    mode: String,
-    xpub: Xpub,
-    settings: serde_json::Value,
-    signing: ProgramProfile,
-}
-
-struct Options {
-    address: SocketAddr,
-    identity: PathBuf,
-    allow_local_dev: bool,
-}
-
-fn options() -> Result<Option<Options>> {
-    let mut args = std::env::args_os().skip(1);
-    let mut address = None;
-    let mut identity = None;
-    let mut allow_local_dev = false;
-    while let Some(argument) = args.next() {
-        match argument.to_str() {
-            Some("--help") => {
-                println!(
-                    "Usage: program_oracle --address IP:PORT --identity FILE [--allow-local-dev]\n\
-                     FILE must be the exact identity JSON accepted by an independent Nitro\n\
-                     attestation verifier, using independently trusted measurements and settings.\n\
-                     This example does NOT verify COSE or trust/fetch /public-key.\n\
-                     --allow-local-dev permits an unattested local-dev identity with null settings\n\
-                     and a test-network xpub, solely for synthetic regtest fixtures.\n\
-                     All funding is synthetic. Nothing is broadcast; no private keys are needed."
-                );
-                return Ok(None);
-            }
-            Some("--address") if address.is_none() => {
-                let value = args.next().context("--address needs IP:PORT")?;
-                address = Some(
-                    value
-                        .to_str()
-                        .context("address must be UTF-8")?
-                        .parse()
-                        .context("address must be an explicit numeric SocketAddr")?,
-                );
-            }
-            Some("--identity") if identity.is_none() => {
-                identity = Some(PathBuf::from(args.next().context("--identity needs FILE")?));
-            }
-            Some("--allow-local-dev") if !allow_local_dev => allow_local_dev = true,
-            _ => bail!("unknown or repeated argument: {argument:?}; use --help"),
-        }
-    }
-    Ok(Some(Options {
-        address: address.context("--address is required; use --help")?,
-        identity: identity.context("--identity is required; use --help")?,
-        allow_local_dev,
-    }))
-}
-
-fn load_identity(options: &Options) -> Result<Identity> {
-    let mut bytes = Vec::new();
-    File::open(&options.identity)
-        .context("opening identity file")?
-        .take(MAX_IDENTITY_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() as u64 <= MAX_IDENTITY_BYTES,
-        "identity exceeds 64 KiB"
-    );
-    let identity: Identity = serde_json::from_slice(&bytes).context("parsing identity JSON")?;
-    ensure!(
-        identity.protocol == IDENTITY_PROTOCOL,
-        "unsupported identity protocol"
-    );
-    ensure!(
-        identity.signing == program_profile(),
-        "identity has an unexpected program profile"
-    );
-    match identity.mode.as_str() {
-        "nitro" => {
-            ensure!(
-                identity.settings.is_object(),
-                "Nitro identity requires settings"
-            );
-        }
-        "local-dev" if options.allow_local_dev => {
-            ensure!(
-                identity.settings.is_null(),
-                "local-dev settings must be null"
-            );
-            ensure!(
-                identity.xpub.network == Network::Regtest.into(),
-                "local-dev requires a test-network xpub"
-            );
-            eprintln!(
-                "WARNING: unattested local-dev identity; synthetic regtest demonstration only"
-            );
-        }
-        _ => bail!("expected nitro identity (local-dev requires --allow-local-dev)"),
-    }
-    Ok(identity)
-}
 
 // Native P2WPKH scripts identify disposable recipients without holding keys.
 fn recipient(tag: u8) -> ScriptBuf {
@@ -462,7 +354,7 @@ async fn inline_v2(client: &ProgramClient, root: &Xpub) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let Some(options) = options()? else {
+    let Some(options) = options("program_oracle")? else {
         return Ok(());
     };
     let identity = load_identity(&options)?;

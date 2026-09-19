@@ -1,3 +1,57 @@
+SOFTWARE VERIFICATION: DURABLE SAFE-WITHDRAWAL EXAMPLE
+
+Source and artifact:
+- Added examples/vault/contract.rs, predicate.rs and the runnable main.rs.
+  The contract compiles locally; its fixed-recipient/capped-fee predicate runs
+  as inline v1 WASM. Production service source and evaluator registry unchanged.
+- guest.rs compares byte-for-byte with evaluators/common.rs from the pinned
+  Sapio c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1 dependency.
+- The pinned Rust 1.98.1 development shell now also includes wasm32-unknown-unknown.
+  build.sh --write generated the 1,317-byte artifact; --check reproduced it.
+- WASM SHA256:
+  1348843e73335007c919e8f0e64b897137c903fdda64244daed34611e1fee136
+- Rebuilding in a separate temporary directory produced identical bytes.
+  Modifying the copied artifact made --check fail without rewriting it;
+  explicit --write restored the original bytes.
+
+Actual services and client behavior:
+- Built both examples and the native local-dev signer with locked dependencies.
+- Ran program_oracle and vault against native and aarch64-musl local-dev
+  services in separate user/network namespaces. The ARM service ran under
+  qemu-aarch64, using the earlier smoke-only ARM build, not a Nitro enclave.
+- All existing program_oracle scenarios passed on both services after its
+  identity/CLI code was moved unchanged in behavior into examples/support/.
+- The vault compiled a real Sapio contract against each service's public root,
+  used the compiled funding output, and selected its program key-path request.
+- 500-sat and exactly 1,000-sat fees were authorized under the same instance
+  and funding. ProgramClient verified the signatures and PSBT integrity;
+  Miniscript finalized and extracted transactions without changing their txids.
+- Typed remote rejections covered a 1,001-sat fee, redirected recipient,
+  output amount exceeding input, extra output and extra input (each retaining
+  the allowed aggregate fee/recipient), unexpected witness, and substitution
+  of a more permissive instance against the original funding.
+- A valid sweep still signed and finalized after all rejections.
+- Both clients rejected a local-dev identity without the explicit bypass and
+  rejected an unexpected program profile even with that bypass.
+- vault --help ran successfully. Funding/recipients were disposable fixtures;
+  no transactions were broadcast or checked against a Bitcoin node.
+
+Build checks:
+- cargo check --locked --offline --all-targets --no-default-features: passed.
+- cargo test --locked --offline --no-default-features: 4 passed.
+- cargo test --locked --offline --features local-dev: 4 passed.
+- cargo fmt --all --check: passed.
+- nix flake check --no-build --no-update-lock-file: passed.
+- Strict Clippy (-D warnings) fails on result_large_err in the external
+  #[sapio::contract] expansion at examples/vault/contract.rs. The pinned macro
+  emits a closure returning Sapio's >=192-byte CompilationError. This warning
+  is not suppressed; fixing that upstream API is outside this example change.
+- CI is configured to reproduce vault.wasm and run both live examples.
+  No new CI run or production EIF rebuild is claimed by these local checks.
+
+Both supervised services were stopped; temporary identities and build copies
+were removed. Real Nitro boot, NSM/KMS provisioning and recovery are unverified.
+
 SOFTWARE VERIFICATION: PROGRAM COMPATIBILITY REVIEW
 
 ARM entrypoint correction:

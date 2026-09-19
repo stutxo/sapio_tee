@@ -1,0 +1,80 @@
+Safe-withdrawal vault: inline v1 example
+
+Sources and licensing
+---------------------
+guest.rs is an unmodified, byte-for-byte copy of:
+  Repository: https://github.com/stutxo/sapio
+  Revision: c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
+  Path: evaluators/common.rs
+  Source: https://github.com/stutxo/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/evaluators/common.rs
+  SHA-256: c923aa67fef39e7610c8e02386af19d8de8bf07d6b8fd6de80f856b7ead00653
+  License: Mozilla Public License 2.0 (MPL-2.0)
+  Upstream copyright: Copyright 2021 Judica, Inc
+  License text: https://github.com/stutxo/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/LICENSE
+  License specification: https://www.mozilla.org/MPL/2.0/
+
+The copied source remains governed by MPL-2.0. Its source is distributed next
+to predicate.rs and the generated vault.wasm. It supplies the upstream bounded
+input arena, allocation export, argument validation, panic handler, Reader,
+and v1 result mapping. predicate.rs contains this example's readable policy;
+it is not a new registered evaluator and does not modify the oracle registry.
+
+Policy and encoding
+-------------------
+Parameters, committed by the contract, are concatenated without padding:
+  max_fee_satoshis:u64 little-endian
+  destination_script_length:u32 little-endian
+  destination_script:exactly destination_script_length bytes
+The inline evaluator's secondary program and the witness must both be empty.
+Trailing parameter bytes, truncated fields, and trailing view bytes reject.
+
+The signed v1 view is decoded as:
+  transaction version:4 bytes; locktime:4 bytes
+  selected input index:u32LE; input count:u32LE
+  single input: outpoint:36 bytes; sequence:4 bytes; value:u64LE;
+                script length:u32LE; script bytes
+  output count:u32LE
+  single output: value:u64LE; script length:u32LE; script bytes
+  end of view
+
+Acceptance requires selected input index zero, exactly one transaction input,
+exactly one output, byte-identical output and committed destination scripts,
+and input_value - output_value in the inclusive range [0, max_fee_satoshis].
+Subtraction is checked: an output exceeding the input rejects. The complete
+accepted view is consumed. Version, locktime, sequence, and the spent script
+are decoded but impose no additional policy. There is no owner authorization,
+delay, recovery path, change output, or partial withdrawal: anyone may trigger
+an allowed complete sweep to the committed recipient. The workflow is for
+synthetic funding only and does not broadcast.
+
+Build and byte verification
+---------------------------
+Run from the repository root, using the pinned Nix development shell:
+  nix develop --no-update-lock-file --command bash examples/vault/build.sh --write
+  nix develop --no-update-lock-file --command bash examples/vault/build.sh --check
+Omitting the option means --check. Use --write only for an intentional artifact
+update. --check builds into a temporary directory and compares with vault.wasm;
+a mismatch or missing artifact fails, and never updates the committed file.
+Both modes clean up the temporary directory on exit and reject artifacts larger
+than 65,536 bytes.
+
+The build uses rustc 1.98.1 from PATH and requires wasm32-unknown-unknown target
+support. It directly compiles predicate.rs (no Cargo dependency resolution),
+using crate name sapio_vault_predicate, cdylib, edition 2021, opt-level=z, LTO,
+codegen-units=1, panic=abort, strip=symbols, a 65,536-byte stack, and initial and
+maximum linear memory of 4,194,304 bytes. The script rejects other compiler
+versions. The resulting module exports memory, sapio_alloc_v1, and
+sapio_evaluate_v1; the latter takes eight u32 pointer/length arguments. The
+upstream helper returns 1 for acceptance, 0 for policy refusal, and -1 for
+invalid arguments or malformed encodings. All values other than 1 reject.
+
+vault.wasm is included by the native example and supplies the exact inline
+predicate bytes. The complete program identity also commits the v1 ABI and the
+fixed parameters. Changes to either Rust source or compilation settings require
+an intentional rebuild and byte verification; the source and binary must travel
+together. No native oracle secret is needed by the client.
+
+Recorded artifact:
+  Size: 1,317 bytes
+  SHA-256: 1348843e73335007c919e8f0e64b897137c903fdda64244daed34611e1fee136
+This is a file digest, not the ProgramInstance ID or derived funding key.

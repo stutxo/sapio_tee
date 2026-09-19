@@ -330,6 +330,40 @@ funding/script-path metadata and pinned identity needed to spend it later.
 For a working end-to-end reference, examples/program_oracle.rs contains an
 inline v2 lock-time predicate, funding/PSBT construction and verified client
 calls. It uses synthetic funding and is not a general file-upload/funding CLI.
+The companion examples/vault/ demonstrates an actual #[sapio::contract] around
+a source-built inline v1 predicate, rather than hand-constructing its funding
+policy. Read contract.rs for the contract, predicate.rs for the rule evaluated
+inside the enclave, and main.rs for compilation and remote signing.
+
+Run against a local-dev signer using its explicitly untrusted local identity:
+
+  nix develop --no-update-lock-file -c cargo run --locked --example vault -- \
+    --address 127.0.0.1:8367 --identity local-identity.json --allow-local-dev
+
+Against Nitro, use the independently verified identity and omit the bypass:
+
+  nix develop --no-update-lock-file -c cargo run --locked --example vault -- \
+    --address PARENT_IP:8367 --identity verified-identity.json
+
+Both invocations still use synthetic funding and never broadcast. The example
+allows a full sweep to one fixed script with at most a 1,000-sat fee; anyone
+may trigger an allowed spend. There is no owner authorization, delay, recovery,
+partial withdrawal or change. It is not a wallet or a production recovery vault.
+All successful responses are signature-checked and finalized; negative cases
+must be typed oracle rejections, not transport failures.
+
+The client embeds examples/vault/vault.wasm. The pinned Nix shell includes
+wasm32-unknown-unknown for reproducing this artifact from predicate.rs and the
+unchanged upstream guest.rs helper:
+
+  nix develop --no-update-lock-file -c bash examples/vault/build.sh --check
+
+Use --write only for intentional artifact updates after editing the source.
+The default --check never overwrites a mismatch. The module is inline v1 and
+does not enter the measured evaluator registry; rebuilding the client after a
+module change is sufficient to submit a NEW instance, not to replace the rule
+of existing funds. Exact build flags, parameter encoding and artifact/source
+digests are recorded in examples/vault/PROVENANCE.txt.
 
 Integrating a Sapio contract:
 - Wrap the instance and verified public root in EmulatedProgram::new, and

@@ -8,6 +8,11 @@ Unreleased
   the custom-inline/compiled-contract workflows and the legacy CTV CLI gap.
   Verify live signing on native and emulated ARM services, including compiled
   Sapio payment contracts. Hardware Nitro/KMS validation remains outstanding.
+- Add a durable, source-built safe-withdrawal vault example: inline Rust/WASM
+  predicate, a real Sapio contract and a remote ProgramClient demonstration.
+  Share identity/CLI checks with the existing example, reproduce the WASM in
+  CI and exercise both examples against the live local signer. The vault is
+  explicitly a permissionless fixed-recipient sweep, not a recovery wallet.
 
 0.2.0 — 2026-09-18
 
