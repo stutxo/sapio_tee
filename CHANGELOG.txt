@@ -5,6 +5,9 @@
   config, and reclaim runner disk before the EIF build: GitHub's ubuntu
   runners previously ran out of space mid-kernel-compile.
 
+- Cache the nix store and cargo artifacts in CI: repeat pushes restore the
+  kernel, odyn, and rust compilation instead of rebuilding them.
+
 - Deploy Sapio's ProgramOracle inside x86_64 AWS Nitro Enclaves, using
   SignProgramV1, bounded inline WASM v1/v2 and a measured pay-at-least/v1
   interpreter.

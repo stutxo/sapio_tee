@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -62,12 +63,18 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - name: Restore and cache the Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
       - name: Evaluate locked flake
         run: nix flake check --no-build --no-update-lock-file
       - name: Build musl application and pinned runner
-        run: nix build --no-update-lock-file .#app .#enclaver --no-link
+        run: nix build --no-update-lock-file .#app .#enclaver --out-link result-bin
       - name: Build measured enclave image
-        run: nix build --no-update-lock-file .#eif --out-link result-eif
+        run: nix build --no-update-lock-file .#eif .#enclave-kernel --out-link result-eif
       - name: Preserve actual build measurements
         uses: actions/upload-artifact@v4
         with:
