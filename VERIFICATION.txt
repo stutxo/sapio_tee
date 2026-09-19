@@ -1,3 +1,74 @@
+SOFTWARE VERIFICATION: PROGRAM COMPATIBILITY REVIEW
+
+ARM entrypoint correction:
+- The previously built start-enclaver script selected an x86_64 Nix-store
+  Bash on its first line; its second ARM shebang was only a comment.
+  The pinned init launches this script with ForkExec, not an explicit shell.
+- Reproduced the architecture mismatch: qemu-aarch64 rejected the selected
+  Bash with "Invalid ELF image for this architecture" (exit 255).
+- Replaced the script builder with writeTextFile and a single #!/bin/sh.
+  /bin/sh in the image selects its static aarch64 BusyBox. The target shell
+  executed under qemu-aarch64, and parsed the generated startup script with
+  sh -n successfully. This does NOT exercise the full init/odyn/Nitro boot.
+- nix flake check --no-build --no-update-lock-file: passed.
+- nix build --no-update-lock-file .#rootfs .#eif: passed.
+- Corrected local EIF: result-program-review-1/sapio_tee.eif (92,229,586 bytes).
+  The older result-arm link and previously published CI artifact are NOT
+  this corrected image. This local rebuild has not been reproduced in CI.
+- SHA256:
+  53067b229a9095e736c6f9ff16d5b6af92802a3be1c78528befa2a3ee45c7645
+- Build-emitted PCR0:
+  97a3b3f19158a320f5577a3bb7fe2a4a834b5b800e8a06be5808487d7d55faa05cf4c2051bdbf0b0de9ba439a27666ee
+- Build-emitted PCR1 (unchanged):
+  c4d45e9a07d8b1c6ebffb9afcecf900428c110a97dce1161f47e9432239c69a3714f5359cd7f7d7ab6e721af6a46a073
+- Build-emitted PCR2:
+  27dfd4e521b7397fc901c1b132665a1e59c8cedfe99e1132abdc7ce25a45d4e2def15da585626d23cf6f91895d90e3ac
+  Independently reproduce/review these measurements before granting access;
+  they are not attestation evidence or automatic replacements for trust pins.
+
+Repeated native live signing:
+- Built the local-dev binary and program_oracle example with locked dependencies.
+- Started the actual HTTP/TCP service in an isolated user/network namespace.
+- The example passed registered payment, authenticated script-path, inline v1
+  CTV and custom inline v2 lock-time signing. It rejected wrong payment terms,
+  missing script authentication, instance substitution, an unknown evaluator,
+  a changed CTV template, wrong lock time, a trap and fuel exhaustion.
+- A valid request still signed afterward. ProgramClient checked successful
+  signatures and unrelated PSBT fields. Funding was synthetic; no broadcast.
+- Stopped the supervised native service cleanly.
+
+AArch64 runtime execution under qemu-user:
+- Built a separate aarch64-musl application override adding --features local-dev.
+  This smoke-only build was NOT substituted into the production EIF; the
+  production build still uses --no-default-features and has no local-dev mode.
+- Started that ARM executable with qemu-aarch64 in an isolated namespace.
+  Its signing profile matched the native service.
+- Ran the same real TCP program_oracle example against it. All acceptance,
+  typed rejection, trap, fuel-exhaustion and post-rejection signing scenarios
+  above passed, including cryptographic verification by ProgramClient.
+- The production ARM binary's --program-profile also ran under qemu-aarch64.
+- Stopped the supervised ARM service cleanly. This exercises ARM machine code
+  and its WASM engine, NOT a Nitro kernel, NSM, attestation or KMS operations.
+
+Compiled Sapio contract to the ARM service:
+- A throwaway client reused the pinned upstream PaymentContract, but compiled
+  it against the running ARM service's ephemeral public root instead of using
+  the example's in-process oracle/private root.
+- Compilation retained the same address while adding suggested candidates.
+  Binding and prepare_spend produced actual ProgramClient requests.
+- The ARM service signed three candidates: 5,000 and 6,000 sats at output 0,
+  and 7,000 sats at output 1. ProgramClient verified the signatures; Miniscript
+  finalized each PSBT; check_finalized_candidate checked its funding policy.
+- Each candidate modified to pay 4,999 sats received a typed remote rejection
+  under its original program commitment and funding.
+- All funding was synthetic; no chain validation or broadcast was performed.
+  The supervised service was stopped. The throwaway client/identity were
+  removed; no new permanent test suite or CLI was added.
+- The corrected production ARM executable rejected --local-dev with exit 1,
+  confirming the smoke-only override was not substituted into the EIF.
+
+Real Nitro boot, NSM/KMS provisioning and restart/recovery remain unverified.
+
 SOFTWARE VERIFICATION: 2026-09-19 — AARCH64 EIF BUILD AND CI
 
 Local x86_64-linux build host, cross-compiled aarch64 outputs:

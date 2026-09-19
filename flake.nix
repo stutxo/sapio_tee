@@ -157,11 +157,17 @@
               then builtins.head nameMatch
               else "application");
             muslInterpreter = "/lib/ld-musl-aarch64.so.1";
-            entrypointScript = pkgs.writeShellScriptBin "start-enclaver" ''
-              #!${pkgsMusl.pkgsStatic.busybox}/bin/sh
-              set -ex
-              exec /bin/odyn --config-dir /etc/enclaver /bin/entrypoint
-            '';
+            # Do not prepend the build host's Bash to an aarch64 entrypoint.
+            entrypointScript = pkgs.writeTextFile {
+              name = "start-enclaver";
+              destination = "/bin/start-enclaver";
+              executable = true;
+              text = ''
+                #!/bin/sh
+                set -ex
+                exec /bin/odyn --config-dir /etc/enclaver /bin/entrypoint
+              '';
+            };
             enclaveRootFs = pkgs.runCommand "enclave-rootfs" {
               nativeBuildInputs = [
                 enclaverCrate

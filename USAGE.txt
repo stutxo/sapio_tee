@@ -243,6 +243,123 @@ If you already have a recovery xpub, compare it as an additional continuity
 check. An xpub alone does not prove enclave identity; PCRs alone do not specify
 the intended KMS key, blockhash, network, returned xpub or expected capabilities.
 
+Program compatibility and authoring
+-----------------------------------
+"Any program" means any predicate satisfying Sapio's evaluator ABI, supported
+WASM features and resource limits. It does NOT mean any binary with a .wasm
+extension. Sapio compiler plugins and signing predicates are different APIs:
+compile the contract and plan its transactions on the client; the enclave
+evaluates the requested spending rule and signs only if both that rule and
+the host's funding/PSBT checks succeed.
+
+The image accepts new inline v1/v2 predicates without operator registration,
+an EIF rebuild or new PCRs. Use v2 for new predicates when its additional
+transaction view and cryptographic operations are needed. A request naming
+an ordinary registered evaluator ID works only if that exact evaluator is
+already in the measured registry. This image registers only pay-at-least/v1.
+
+Author a custom predicate:
+1. Start from the pinned Sapio repository's evaluators/ examples and
+   docs/WASM_EVALUATORS.md. The no_std Rust examples, common/v2 invocation
+   helpers and fragment SDK demonstrate the actual guest ABI; a WASI command
+   or an ordinary Sapio compiler-plugin module is not a substitute.
+   In that repository, bash evaluators/build.sh --check reproduces the bundled
+   artifacts; --write deliberately updates those artifacts after changes.
+2. Export linear memory, sapio_alloc_v2(i32) -> i32, and sapio_evaluate_v2
+   taking four pointer/length pairs (program, parameters, signed transaction
+   view, witness) and returning i32. Return exactly 1 to authorize or 0 to
+   reject. Traps, fuel exhaustion and invalid return values fail closed.
+   V1 uses the corresponding _v1 export names and its own view/import ABI.
+3. Inline dispatch stores the module in ProgramInstance.program but passes
+   EMPTY program bytes to the guest. Put fixed policy data in parameters;
+   put per-spend evidence in witness. Registered dispatch instead passes the
+   instance's program bytes to its embedded interpreter. Account for this
+   difference before reusing a registered module as an inline predicate.
+4. Implement the actual authorization rule. Witness bytes are caller-chosen:
+   verify signatures/proofs or compare them with committed policy data as
+   appropriate. An always-true predicate lets any caller obtain an oracle
+   signature for a compatible spend; the service itself has no caller auth.
+
+The guest receives a versioned binary transaction projection, not raw PSBT
+bytes, blockchain state or a Bitcoin RPC connection. It has no filesystem,
+network, persistent state or access to the oracle's private root. External
+facts must arrive as evidence and be authenticated by the predicate.
+
+Limits include 65,536 bytes each for module/program, parameters and witness,
+a 1 MiB encoded transaction view, 64 MiB linear memory and 100 million shared
+execution/host-crypto fuel units. No WASI imports or start function are allowed.
+Both ABIs expose sapio_crypto_v1 SHA256, public BIP32 derivation and 32-byte-
+message Schnorr verification. V2 additionally exposes sapio_crypto_v2 variable-
+length-message Schnorr verification and x-only tweak checking. Other pure
+WASM computations must fit the supported features and budgets.
+
+Before real funding, exercise the EXACT module bytes/ABI/parameters with
+accepted and rejected spends in the intended context. ProgramInstance
+construction and public-key derivation do not validate the guest ABI or prove
+the predicate can ever accept. Committing broken code can strand the output.
+
+Fund and call it:
+1. Verify fresh Nitro attestation, expected settings/PCRs/profile and pin the
+   xpub BEFORE deriving an address. The example's load_identity is not an
+   attestation verifier.
+2. Construct the committed instance and derive its public key, for example:
+
+     let instance = ProgramInstance::wasm_v2(
+         std::fs::read("policy.wasm")?, parameters,
+     )?;
+     let key = instance.derive_public_key(&pinned_xpub)?;
+     let funding_script = ScriptBuf::new_p2tr(
+         &Secp256k1::verification_only(), key, None,
+     );
+
+   This is a key-path-only Taproot construction. Fund that exact script,
+   not the root xpub's key. For a script-path construction, commit the desired
+   tree and supply its authenticated leaf/control block when spending.
+3. Build a PSBT spending the funded output, supply every input's prevout and
+   the required Taproot metadata, then submit the instance, selected input,
+   witness and spend path through ProgramClient as described below.
+4. ProgramClient validates the returned signature and PSBT integrity. Complete
+   any other required signatures, finalize, and broadcast with your wallet.
+   The enclave does not fund outputs, broadcast, or check chain confirmation.
+
+Changing module bytes, ABI/evaluator or fixed parameters changes the committed
+instance and derived key. A recompiled module cannot retroactively replace
+the rule on an already funded output. Archive the exact bytes, parameters,
+funding/script-path metadata and pinned identity needed to spend it later.
+
+For a working end-to-end reference, examples/program_oracle.rs contains an
+inline v2 lock-time predicate, funding/PSBT construction and verified client
+calls. It uses synthetic funding and is not a general file-upload/funding CLI.
+
+Integrating a Sapio contract:
+- Wrap the instance and verified public root in EmulatedProgram::new, and
+  return that program from a contract policy. Compile the contract locally
+  with Compilable::compile or its separate compiler-plugin host. Preserve the
+  compiled Object, including its program policies and intended spend paths.
+- Select the appropriate entry from object.program_requirements(); these are
+  alternatives/requirements at specific paths, not a list to blindly sign.
+  prepare_program_request(&object, &requirement, psbt, input_index, witness)
+  prepares one request. prepare_spend can plan a whole branch and return
+  unsigned program requests. Send them using ProgramClient, merge verified
+  responses as appropriate, satisfy other guards and finalize the transaction.
+- The pinned upstream integration_tests/src/program_example.rs PaymentContract
+  is a full contract example using the same registered pay-at-least interpreter.
+  Suggested actions generate candidates without changing the fixed policy.
+  Its example funding is synthetic, not a wallet implementation.
+- The upstream CLI's signer-emulation mode uses the LEGACY CTV protocol and
+  key derivation, not SignProgramV1. Pointing those peers at this enclave does
+  not adapt them. There is no general module/PSBT ProgramClient CLI yet.
+- Ordinary committed Sapio actions also add CTV requirements. A program guard
+  does not automatically replace those conditions, and the current LoweringPlan
+  has no automatic ProgramOracle lowering mode. To use this service for CTV,
+  explicitly construct ctv_wasm_instance(Ctv(expected_hash)) and include it as
+  an EmulatedProgram, or separately satisfy the existing contract requirements.
+  The distributed CTV predicate requires all inputs to spend native witness
+  outputs; legacy/P2SH, including wrapped SegWit, are outside its domain.
+
+The enclave's approval is a trusted signing decision, not native Bitcoin
+enforcement of new opcodes or proof of complete transaction validity.
+
 Program requests and client
 ---------------------------
 Use emulator_connect::program::ProgramClient::new(address, pinned_xpub) and

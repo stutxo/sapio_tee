@@ -1,3 +1,14 @@
+Unreleased
+
+- Fix the aarch64 enclave startup script to use the image's /bin/sh.
+  writeShellScriptBin had prepended an x86_64 build-host Bash interpreter,
+  preventing native ARM startup despite a successful EIF build. Rebuild the
+  image and review its new PCR0/PCR2 before deployment.
+- Document the distinction between compiler plugins and signing predicates,
+  the custom-inline/compiled-contract workflows and the legacy CTV CLI gap.
+  Verify live signing on native and emulated ARM services, including compiled
+  Sapio payment contracts. Hardware Nitro/KMS validation remains outstanding.
+
 0.2.0 — 2026-09-18
 
 - Build the enclave image around a minimal defconfig-based kernel (Nitro

@@ -4,6 +4,12 @@ Run [Sapio](https://github.com/stutxo/sapio)'s full **ProgramOracle** inside an 
 
 The signer evaluates bounded inline WASM predicates (v1 and v2) and a fixed, measured `pay-at-least/v1` interpreter. Clients verify the enclave's public identity, including its program capabilities, pin its extended public key, and sign explicit `ProgramSigningRequest`s using Sapio's `ProgramClient`.
 
+“Program” here means a signing predicate implementing Sapio's evaluator ABI,
+not an arbitrary Sapio compiler-plugin WASM module. Compile contracts and plan
+transactions on the client; send their supported program instances and spend
+requests to the enclave. Custom inline predicates need no enclave rebuild.
+See the “Program compatibility and authoring” section in [USAGE.txt](USAGE.txt).
+
 > **Status:** **Real Nitro boot, live KMS provisioning, and enclave restart/recovery have not been exercised.** Software/build results and their scope are recorded in [verification evidence](VERIFICATION.txt); this is not a production-custody assurance. Review the [security model](SECURITY.txt).
 
 ## How it works
