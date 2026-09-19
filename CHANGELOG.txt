@@ -8,6 +8,11 @@
 - Cache the nix store and cargo artifacts in CI: repeat pushes restore the
   kernel, odyn, and rust compilation instead of rebuilding them.
 
+- Target aarch64: the enclave image, supervisor, and parent runner are now
+  cross-compiled for Graviton Nitro Enclaves from the x86_64 build host —
+  arm64 defconfig kernel (`Image`), aarch64 musl statics, aarch64 init and
+  busybox. Local development remains native x86_64.
+
 - Deploy Sapio's ProgramOracle inside x86_64 AWS Nitro Enclaves, using
   SignProgramV1, bounded inline WASM v1/v2 and a measured pay-at-least/v1
   interpreter.

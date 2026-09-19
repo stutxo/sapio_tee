@@ -1,5 +1,5 @@
 {
-  description = "Sapio program oracle for AWS Nitro Enclaves (x86_64-linux)";
+  description = "Sapio program oracle for AWS Nitro Enclaves (aarch64 enclave image, x86_64 build host)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -23,13 +23,16 @@
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
         # Only the libc target changes: compiler/build scripts run on native x86_64.
-        # No ARM, Darwin, or architecture-cross build is advertised.
+        # The enclave image targets aarch64 (Graviton Nitro Enclaves); everything
+        # inside the EIF is aarch64-unknown-linux-musl, cross-compiled from this host.
         pkgsMusl = import nixpkgs {
           inherit system overlays;
-          crossSystem.config = "x86_64-unknown-linux-musl";
+          crossSystem.config = "aarch64-unknown-linux-musl";
         };
+        # aarch64 cross packages, used for the enclave init (static Go, no libc).
+        pkgsAarch64 = pkgs.pkgsCross.aarch64-multiplatform;
         toolchain = pkgs.rust-bin.stable."1.98.1".default.override {
-          targets = [ "x86_64-unknown-linux-musl" ];
+          targets = [ "aarch64-unknown-linux-musl" ];
         };
         rustPlatform = pkgsMusl.makeRustPlatform {
           cargo = toolchain;
@@ -71,29 +74,33 @@
           postInstall = ''
             cp -L "$out/bin/sapio-tee" "$out/bin/entrypoint"
           '';
-          meta.platforms = [ "x86_64-linux" ];
+          meta.platforms = [ "aarch64-linux" ];
         };
         # The pinned init package predates buildGoModule's env attribute set.
         # Preserve its source/flags while moving CGO_ENABLED to the current API.
-        init = pkgs.callPackage "${enclaver.inputs.nitro-util}/init" {
-          buildGoModule = args: pkgs.buildGoModule
+        # Cross-built for aarch64: pure Go (CGO_ENABLED=0), statically linked.
+        init = pkgsAarch64.callPackage "${enclaver.inputs.nitro-util}/init" {
+          buildGoModule = args: pkgsAarch64.buildGoModule
             ((builtins.removeAttrs args [ "CGO_ENABLED" ]) // {
               env.CGO_ENABLED = args.CGO_ENABLED;
             });
         };
         nitro = enclaver.inputs.nitro-util;
-        # nitro-util's EIF builder, with the compiled-from-source init swapped in.
+        # nitro-util's EIF builder, with the compiled-from-source init swapped in
+        # and arch pinned to aarch64: the EIF runs on Graviton Nitro Enclaves,
+        # built from an x86_64 host.
         buildEif = args: nitro.lib.${system}.buildEif
-          (args // { init = "${init}/bin/init"; });
+          (args // { arch = "aarch64"; init = "${init}/bin/init"; });
         # Enclave image assembly vendored from nix-enclaver's makeAppEif
         # (joshdoman/nix-enclaver abe3b6a), with one change: the kernel.
         # nix-enclaver overrides pkgs.linux_6_12 on top of nixpkgs' common
         # config, which compiles essentially every driver as a module —
         # >10 GB of outputs and ~1h of compile time, enough to exhaust the
         # ~14 GB disk of a GitHub ubuntu runner mid-build. The enclave needs
-        # only upstream x86_64 defconfig plus the Nitro options below, so the
-        # common config is disabled entirely.
-        enclaveKernel = pkgs.linux_6_12.override {
+        # only upstream arm64 defconfig plus the Nitro options below, so the
+        # common config is disabled entirely. The kernel is cross-compiled for
+        # aarch64; it installs as `Image`, not `bzImage`.
+        enclaveKernel = pkgs.pkgsCross.aarch64-multiplatform.linux_6_12.override {
           enableCommonConfig = false;
           autoModules = false;
           structuredExtraConfig = with pkgs.lib.kernel; {
@@ -106,6 +113,8 @@
             SERIAL_8250_CONSOLE = yes;
             TMPFS = yes;
             # Nitro Enclave devices: virtio-mmio, vsock, and the NSM driver.
+            # NSM depends only on VIRTIO and works identically on arm64
+            # (AWS ships it as nsm.ko; we build it in instead).
             NET = yes;
             INET = yes;
             VIRTIO = yes;
@@ -147,9 +156,9 @@
             eifName = pkgs.lib.replaceStrings [ "-" ] [ "_" ] (if nameMatch != null
               then builtins.head nameMatch
               else "application");
-            muslInterpreter = "/lib/ld-musl-x86_64.so.1";
+            muslInterpreter = "/lib/ld-musl-aarch64.so.1";
             entrypointScript = pkgs.writeShellScriptBin "start-enclaver" ''
-              #!${pkgs.pkgsStatic.busybox}/bin/sh
+              #!${pkgsMusl.pkgsStatic.busybox}/bin/sh
               set -ex
               exec /bin/odyn --config-dir /etc/enclaver /bin/entrypoint
             '';
@@ -157,7 +166,7 @@
               nativeBuildInputs = [
                 enclaverCrate
                 appPackage
-                pkgs.pkgsStatic.busybox
+                pkgsMusl.pkgsStatic.busybox
                 pkgsMusl.stdenv.cc.libc
                 entrypointScript
                 pkgs.patchelf
@@ -178,7 +187,10 @@
                   patchelf --set-interpreter ${muslInterpreter} "$binary" || true
                 fi
               done
-              cp -L ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
+              cp -L ${pkgsMusl.pkgsStatic.busybox}/bin/busybox $out/bin/
+              # Applet names come from the host's busybox (same version and
+              # config as the aarch64 one we just installed); they are data,
+              # not executable work.
               ${pkgs.pkgsStatic.busybox}/bin/busybox --list | while read applet; do
                 ln -s /bin/busybox $out/bin/$applet
               done
@@ -187,15 +199,15 @@
               cp -L ${configFile} $out/etc/enclaver/enclaver.yaml
             '';
             baseEif = buildEif {
-              name = "${eifName}-x86_64";
-              kernel = "${enclaveKernel}/bzImage";
+              name = "${eifName}-aarch64";
+              kernel = "${enclaveKernel}/Image";
               kernelConfig = "${enclaveKernel.configfile}";
               nsmKo = null;
               copyToRoot = enclaveRootFs;
               entrypoint = "/bin/start-enclaver";
               env = "";
             };
-            enclaverEif = pkgs.runCommand "${eifName}-x86_64" { } ''
+            enclaverEif = pkgs.runCommand "${eifName}-aarch64" { } ''
               mkdir -p $out
               cp ${baseEif}/* $out/
               cp ${baseEif}/image.eif $out/${eifName}.eif
@@ -210,7 +222,7 @@
           appPackage = app;
           configFile = ./enclaver.yaml;
         };
-        runner = enclaver.packages.${system}.x86_64-enclaver;
+        runner = enclaver.packages.${system}.aarch64-enclaver;
       in {
         packages = {
           inherit app;

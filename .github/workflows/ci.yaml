@@ -78,7 +78,7 @@ jobs:
       - name: Preserve actual build measurements
         uses: actions/upload-artifact@v4
         with:
-          name: sapio-tee-x86_64-eif
+          name: sapio-tee-aarch64-eif
           path: |
             result-eif/*.eif
             result-eif/pcr.json

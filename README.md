@@ -19,7 +19,7 @@ The design follows [confidential-script-tee](https://github.com/joshdoman/confid
 
 ## Local quick start
 
-Use an **x86_64 Linux** workstation with [Nix](https://nixos.org/download/) installed and the `nix-command` and `flakes` features enabled. The development shell supplies the pinned Rust 1.98.1 toolchain and native dependencies.
+Use an **x86_64 Linux** workstation with [Nix](https://nixos.org/download/) installed and the `nix-command` and `flakes` features enabled. The development shell supplies the pinned Rust 1.98.1 toolchain and native dependencies. The enclave image itself targets **aarch64** (Graviton Nitro Enclaves) and is cross-compiled from this x86_64 host.
 
 From the repository root:
 
@@ -68,7 +68,7 @@ nix build --no-update-lock-file .#enclaver --out-link result-runner
 
 | Output | Purpose |
 | --- | --- |
-| `result-eif/sapio_tee.eif` | Deployable x86_64 enclave image |
+| `result-eif/sapio_tee.eif` | Deployable aarch64 enclave image (Graviton Nitro Enclaves) |
 | `result-eif/pcr.json` | Measurements emitted by the image builder |
 | `result-runner/bin/enclaver` | Parent-side runner and proxies |
 
@@ -78,7 +78,7 @@ The build includes the musl signer, supervisor, init, and Linux kernel; the firs
 
 Follow the complete [build, provisioning, attestation, and recovery guide](USAGE.txt). Deployment requires:
 
-- An enclave-enabled x86_64 EC2 parent with `nitro-cli`, the Nitro driver, and the allocator service configured.
+- An enclave-enabled aarch64 (Graviton) EC2 parent with `nitro-cli`, the Nitro driver, and the allocator service configured.
 - An AWS-generated **`ECC_NIST_P256` / `KEY_AGREEMENT`** KMS key, an instance-profile role, and a separate administrator role in the same commercial AWS account.
 - An independently reviewed PCR0 policy generated with [`deploy/key-policy.py`](deploy/key-policy.py).
 - A future, unpredictable Bitcoin blockhash agreed upon **after** restricting and auditing the KMS policy; verify its provenance and confirmation depth independently.
@@ -90,7 +90,7 @@ Start the enclave using [`deploy/run-enclave.py`](deploy/run-enclave.py), initia
 ./result-app/bin/sapio-tee --program-profile > expected-program-profile.json
 ```
 
-Build `result-app` with `nix build --no-update-lock-file .#app --out-link result-app` first. The command requires no NSM or AWS access. Pass `--program-profile expected-program-profile.json` to the verifier; never extract your expected profile from the host's response. Production clients consume `verified-identity.json` and omit `--allow-local-dev`:
+Build `result-app` with `nix build --no-update-lock-file .#app --out-link result-app` first. The binary is aarch64: run this step on an aarch64 Linux host (e.g. the parent, or with qemu-user binfmt on the build machine). The command requires no NSM or AWS access. Pass `--program-profile expected-program-profile.json` to the verifier; never extract your expected profile from the host's response. Production clients consume `verified-identity.json` and omit `--allow-local-dev`:
 
 ```sh
 nix develop --no-update-lock-file -c cargo run --locked --example program_oracle -- \

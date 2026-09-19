@@ -9,8 +9,9 @@ credentials to the supervisor;
 it never receives an application seed. No script creates EC2, IAM, KMS, or
 network resources. Review SECURITY.txt before putting funds at risk.
 
-Only native x86_64-linux builders and x86_64 Nitro parents are supported. The
-application is compiled for x86_64-unknown-linux-musl with Rust 1.98.1. Do not
+Native x86_64-linux builders are supported; the enclave image itself targets
+aarch64 (Graviton Nitro Enclaves) and the application is cross-compiled for
+aarch64-unknown-linux-musl with Rust 1.98.1. Do not
 substitute a different Rust version or silently update either lock file.
 Commercial AWS partition (arn:aws), standard regional KMS endpoints, and a
 same-account KMS key / parent IAM role / separate administrator IAM role are
@@ -35,8 +36,9 @@ The default package is also the EIF. Outputs:
 
 The application build uses Cargo.lock and --no-default-features. The local-dev
 feature is NOT in the EIF. Wasmer executes program predicates; the
-native compiler, cmake and build-host libclang are deliberate requirements,
-not evidence of an ARM cross-build. Git dependencies are fetched at exact
+native compiler, cmake and build-host libclang are deliberate requirements —
+build-time binaries run on the x86_64 host, while the produced artifacts are
+aarch64. Git dependencies are fetched at exact
 Cargo.lock revisions. Kernel, supervisor, toolchain and manifest changes can
 change measurements. Keep the source commit, Cargo.lock, flake.lock, EIF, build
 logs, and PCRs together. Builds can be large: upstream compiles a Nitro kernel.
@@ -44,8 +46,10 @@ No byte-for-byte reproducibility or successful Nitro deployment is claimed
 solely because the inputs are pinned. Independently rebuild and compare the
 actual EIF and measurements before admitting an image to your policy.
 
-The flake calls the pinned upstream x86_64 makeAppEif { appPackage; configFile; }
-API. Its monzo EIF builder includes the rootfs Nix closure; do not strip that
+The flake calls the pinned upstream makeAppEif { appPackage; configFile; } API
+with arch=aarch64 (arm64 defconfig kernel, `Image`, aarch64 musl statics, and
+the aarch64 ld-musl interpreter). Its monzo EIF builder includes the rootfs Nix
+closure; do not strip that
 closure (the supervisor startup script references its packaged interpreter).
 Two build-only compatibility adaptations are explicit in flake.nix: the
 pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set,
@@ -63,9 +67,9 @@ does not prove Nitro boot, hardware attestation, IAM enforcement or KMS access.
 
 Prepare the parent and KMS (operator actions, not automated)
 ----------------------------------------------------------
-Use an enclave-enabled x86_64 Nitro EC2 instance with sufficient spare whole
-CPU cores and memory. Install nitro-cli and the Nitro driver, configure access
-to /dev/nitro_enclaves (normally the ne group), and configure the allocator in
+Use an enclave-enabled aarch64 (Graviton) Nitro EC2 instance with sufficient
+spare whole CPU cores and memory. Install nitro-cli and the Nitro driver,
+configure access to /dev/nitro_enclaves (normally the ne group), and configure the allocator in
 /etc/nitro_enclaves/allocator.yaml. Set cpu_count and memory_mib for the requested
 resources; enable/start nitro-enclaves-allocator.service yourself. The launcher
 checks the CLI, device access and service, but does not reserve resources or
@@ -207,7 +211,9 @@ image and generate its signing profile OFFLINE on the trusted machine:
   ./result-app/bin/sapio-tee --program-profile > expected-program-profile.json
 
 This command needs neither /dev/nsm nor AWS credentials and does not initialize
-or expose a private root. Never derive expected capabilities from /public-key
+or expose a private root. The binary is aarch64: execute it on an aarch64
+Linux host — the prepared parent works, or qemu-user binfmt on the x86_64
+build machine. Never derive expected capabilities from /public-key
 or the attestation response itself. Independently trust this profile just as
 you trust setup.json and the PCRs; do not run a parent-supplied binary to obtain
 it. Keep it as part of the public deployment/recovery record.

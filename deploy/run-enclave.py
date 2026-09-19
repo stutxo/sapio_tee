@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an existing EIF on a prepared x86_64 Nitro parent; never create AWS resources."""
+"""Run an existing aarch64 EIF on a prepared Graviton Nitro parent; never create AWS resources."""
 
 import argparse
 import os
@@ -27,10 +27,10 @@ def main():
     parser.add_argument("--memory-mib", required=True, type=positive_i32)
     args = parser.parse_args()
     manifest = Path(__file__).resolve().parent.parent / "enclaver.yaml"
-    if platform.system() != "Linux" or platform.machine() != "x86_64":
-        parser.error("only x86_64 Linux Nitro parent instances are supported")
+    if platform.system() != "Linux" or platform.machine() != "aarch64":
+        parser.error("only aarch64 (Graviton) Linux Nitro parent instances are supported")
     if args.cpu_count % 2:
-        parser.error("x86_64 Nitro enclaves require an even CPU count (whole physical cores)")
+        parser.error("aarch64 Nitro enclaves require an even CPU count (whole physical cores)")
     if not args.eif.is_file() or not manifest.is_file():
         parser.error("EIF or repository enclaver.yaml is missing")
     runner = shutil.which(args.runner)
