@@ -1,5 +1,10 @@
 0.2.0 — 2026-09-18
 
+- Build the enclave image around a minimal defconfig-based kernel (Nitro
+  virtio/vsock/NSM options built in) instead of nixpkgs' all-driver common
+  config, and reclaim runner disk before the EIF build: GitHub's ubuntu
+  runners previously ran out of space mid-kernel-compile.
+
 - Deploy Sapio's ProgramOracle inside x86_64 AWS Nitro Enclaves, using
   SignProgramV1, bounded inline WASM v1/v2 and a measured pay-at-least/v1
   interpreter.

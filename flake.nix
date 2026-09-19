@@ -82,19 +82,131 @@
             });
         };
         nitro = enclaver.inputs.nitro-util;
-        compatibleEnclaver = (import "${enclaver}/flake.nix").outputs {
-          self = enclaver;
-          inherit nixpkgs rust-overlay flake-utils;
-          nitro-util = nitro // {
-            lib = nitro.lib // {
-              ${system} = nitro.lib.${system} // {
-                buildEif = args: nitro.lib.${system}.buildEif
-                  (args // { init = "${init}/bin/init"; });
-              };
-            };
+        # nitro-util's EIF builder, with the compiled-from-source init swapped in.
+        buildEif = args: nitro.lib.${system}.buildEif
+          (args // { init = "${init}/bin/init"; });
+        # Enclave image assembly vendored from nix-enclaver's makeAppEif
+        # (joshdoman/nix-enclaver abe3b6a), with one change: the kernel.
+        # nix-enclaver overrides pkgs.linux_6_12 on top of nixpkgs' common
+        # config, which compiles essentially every driver as a module —
+        # >10 GB of outputs and ~1h of compile time, enough to exhaust the
+        # ~14 GB disk of a GitHub ubuntu runner mid-build. The enclave needs
+        # only upstream x86_64 defconfig plus the Nitro options below, so the
+        # common config is disabled entirely.
+        enclaveKernel = pkgs.linux_6_12.override {
+          enableCommonConfig = false;
+          autoModules = false;
+          structuredExtraConfig = with pkgs.lib.kernel; {
+            # Boot: ramdisks, console, devtmpfs, tmpfs, entropy.
+            BLK_DEV_INITRD = yes;
+            RD_GZIP = yes;
+            DEVTMPFS = yes;
+            DEVTMPFS_MOUNT = yes;
+            SERIAL_8250 = yes;
+            SERIAL_8250_CONSOLE = yes;
+            TMPFS = yes;
+            # Nitro Enclave devices: virtio-mmio, vsock, and the NSM driver.
+            NET = yes;
+            INET = yes;
+            VIRTIO = yes;
+            VIRTIO_MENU = yes;
+            VIRTIO_MMIO = yes;
+            VIRTIO_MMIO_CMDLINE_DEVICES = yes;
+            VSOCKETS = yes;
+            VIRTIO_VSOCKETS = yes;
+            CRYPTO_USER_API = yes;
+            CRYPTO_USER_API_HASH = yes;
+            NSM = yes;
           };
+          ignoreConfigErrors = false;
         };
-        enclave = compatibleEnclaver.lib.${system}.x86_64.makeAppEif {
+        # The enclaver supervisor (odyn), statically linked against musl.
+        enclaverCrate = pkgsMusl.rustPlatform.buildRustPackage {
+          pname = "enclaver-app";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSourceWith {
+            src = enclaver;
+            filter = path: type:
+              let
+                relativePath = pkgs.lib.removePrefix (toString enclaver + "/") (toString path);
+              in
+                !(pkgs.lib.hasPrefix "examples/" relativePath) &&
+                !(pkgs.lib.hasPrefix ".github/" relativePath) &&
+                !(relativePath == "README.md");
+          };
+          buildFeatures = [ "odyn" ];
+          cargoLock.lockFile = enclaver + "/Cargo.lock";
+          doCheck = false;
+          RUSTFLAGS = "-C target-feature=+crt-static";
+        };
+        # Assemble a Nitro EIF around an application bin/entrypoint.
+        makeAppEif = { appPackage, configFile }:
+          let
+            configContent = builtins.readFile configFile;
+            nameMatch = builtins.match ".*name: \"?([^\"]+)\"?.*" configContent;
+            eifName = pkgs.lib.replaceStrings [ "-" ] [ "_" ] (if nameMatch != null
+              then builtins.head nameMatch
+              else "application");
+            muslInterpreter = "/lib/ld-musl-x86_64.so.1";
+            entrypointScript = pkgs.writeShellScriptBin "start-enclaver" ''
+              #!${pkgs.pkgsStatic.busybox}/bin/sh
+              set -ex
+              exec /bin/odyn --config-dir /etc/enclaver /bin/entrypoint
+            '';
+            enclaveRootFs = pkgs.runCommand "enclave-rootfs" {
+              nativeBuildInputs = [
+                enclaverCrate
+                appPackage
+                pkgs.pkgsStatic.busybox
+                pkgsMusl.stdenv.cc.libc
+                entrypointScript
+                pkgs.patchelf
+              ];
+            } ''
+              mkdir -p $out/bin $out/lib $out/etc/enclaver
+              cp -L ${pkgsMusl.stdenv.cc.libc}/lib/* $out/lib/
+              cp -L ${enclaverCrate}/bin/odyn $out/bin/odyn
+              cp -L ${appPackage}/bin/* $out/bin/
+              # The application package must provide bin/entrypoint.
+              if [ ! -f ${appPackage}/bin/entrypoint ]; then
+                echo "Error: appPackage must provide a binary named 'entrypoint'"
+                exit 1
+              fi
+              chmod +w $out/bin/*
+              for binary in $out/bin/*; do
+                if [ -f "$binary" ] && [ -x "$binary" ]; then
+                  patchelf --set-interpreter ${muslInterpreter} "$binary" || true
+                fi
+              done
+              cp -L ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
+              ${pkgs.pkgsStatic.busybox}/bin/busybox --list | while read applet; do
+                ln -s /bin/busybox $out/bin/$applet
+              done
+              cp -L ${entrypointScript}/bin/start-enclaver $out/bin/start-enclaver
+              chmod +x $out/bin/start-enclaver
+              cp -L ${configFile} $out/etc/enclaver/enclaver.yaml
+            '';
+            baseEif = buildEif {
+              name = "${eifName}-x86_64";
+              kernel = "${enclaveKernel}/bzImage";
+              kernelConfig = "${enclaveKernel.configfile}";
+              nsmKo = null;
+              copyToRoot = enclaveRootFs;
+              entrypoint = "/bin/start-enclaver";
+              env = "";
+            };
+            enclaverEif = pkgs.runCommand "${eifName}-x86_64" { } ''
+              mkdir -p $out
+              cp ${baseEif}/* $out/
+              cp ${baseEif}/image.eif $out/${eifName}.eif
+              rm -f $out/image.eif
+            '';
+          in
+          {
+            eif = enclaverEif;
+            rootfs = enclaveRootFs;
+          };
+        enclave = makeAppEif {
           appPackage = app;
           configFile = ./enclaver.yaml;
         };
@@ -105,6 +217,7 @@
           eif = enclave.eif;
           default = enclave.eif;
           rootfs = enclave.rootfs;
+          enclave-kernel = enclaveKernel;
           enclaver = runner;
         };
         apps.enclaver = {
