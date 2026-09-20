@@ -107,6 +107,96 @@ update an already funded contract. See [provenance and encoding](examples/vault/
 CI checks the exact WASM bytes and runs both signing examples. This inline
 program needs no registry change or enclave redeployment.
 
+### Research: Cohort Exit — batch together, or refund
+
+[`examples/cohort_exit`](examples/cohort_exit) is an executable protocol
+experiment, **not a wallet or a production privacy service**. The proposed
+wallet flow is: approve one complete payout roster and fee cap, fund one
+deposit, then go offline. Any relayer can finish the agreed batch through
+the existing ProgramOracle; no participant signs the final batch.
+
+1. A cohort agrees on fresh, distinct P2TR destinations, one denomination,
+   one per-person fee cap and a fresh cohort nonce. Each user must verify
+   their own destination, the entire roster, the independently pinned oracle
+   root, and their native refund key **before funding**.
+2. Each user's Sapio contract has two alternatives: the program-derived
+   signing key, or that user's signature plus a 144-block CSV delay.
+   Different refund keys produce different deposit addresses.
+3. The inline predicate permits exactly the committed number of distinct
+   inputs of the agreed denomination, and exactly the complete payout
+   roster, each paid the same amount within the fee cap. Output order is
+   free; no input-to-output assignment is published in a Bitcoin witness.
+4. Normal settlement uses Taproot key paths. If settlement fails, each user
+   can refund independently without the oracle, subject to Bitcoin's
+   actual relative-locktime rules.
+
+The crucial rule is **every deposit commits to every payout**, not “my payout
+appears somewhere”. The latter permits multiple deposits to claim one output.
+The complete-roster rule also permits uniform fee increases without bringing
+depositors online. Any relayer can choose the maximum authorized fee.
+
+This is a new composition in this repository, **not a claim of new CoinJoin
+cryptography or established global novelty**. The useful experiment is
+offline-after-setup settlement with native refunds. Setup still requires
+coordination; recipients cannot be changed or late users added after funding.
+Research inputs included the adjacent Bitcoin Script tree's
+`bitcoin-scripts/knowledge/bitcoin-script-reference.md`,
+`bitcoin-scripts/knowledge/primitives/point-locks.md`, and
+`research/silent-payments/design-review.md` (locally found at
+`../../bitcoin_script`). No dependency on that checkout was added.
+Silent Payments, adaptor signatures and threshold custody address different
+properties; none is silently supplied by this protocol.
+
+**Privacy/trust boundary:** amounts, batch membership and timing remain public.
+A chain observer without address labels, setup transcripts or later-spend
+information has multiple compatible assignments; this is not privacy from
+the setup coordinator or plaintext-observing host. Sybils, collusion, reuse and
+consolidation can remove the ambiguity. Oracle compromise can steal deposits;
+refunds address unavailability, not a malicious oracle. After CSV maturity,
+refund and settlement race until one confirms. Matching foreign P2TR inputs
+may replace original deposits: the predicate guarantees the payout roster,
+not membership of a specific funded cohort. See [SECURITY.txt](SECURITY.txt).
+
+Run the offline, fixed-fixture harness with cached dependencies and the pinned
+Rust 1.98.1 toolchain (including `wasm32-unknown-unknown`):
+
+```sh
+bash autoresearch.sh
+# If the tools are not already on PATH:
+nix develop --offline --no-update-lock-file -c bash autoresearch.sh
+```
+
+The entrypoint rebuilds the guest, compares it with the checked-in WASM, then
+runs the actual deployment registry in process. No network, AWS, Bitcoin node,
+live funds or clock is involved. Deliberate predicate changes require
+rebuilding `examples/cohort_exit/cohort_exit.wasm` using the exact `rustc`
+command in `autoresearch.sh`, with that path as `-o`; never bypass `cmp`.
+The guest reuses `examples/vault/guest.rs` and its recorded upstream provenance.
+Its committed encoding is `CE01 || nonce[32] || count:u32LE ||
+denomination:u64LE || fee_cap:u64LE || sorted_distinct_P2TR_scripts[34*count]`;
+the witness is empty. The inline ABI and guest bytes also enter the program
+identity. Recompilation does not upgrade existing deposits.
+
+The four-user fixture deposits 100,000 sats each and pays 99,500 sats each,
+with a 1,000-sat per-person cap. Measured baseline:
+
+| Metric | Value |
+| --- | ---: |
+| Settlement transaction | 414 vbytes |
+| Four separate deposit transactions | 444 vbytes |
+| Deposit + settlement per user (primary metric) | 214.5 vbytes |
+| Single native refund alternative | 138 vbytes |
+| Amount/type-only global assignment count | 24 |
+| Assignment count with two known pairs | 2 |
+
+The primary metric includes the extra deposits rather than hiding that cost;
+it excludes the alternative refund, later recipient spending, change outputs
+and setup/network overhead. This is not a fee saving claim over ordinary
+CoinJoin. The assignment counts are a deliberately weak observer model,
+not measured anonymity. All fixture secrets are public: **never fund these
+addresses**. [Verification evidence](VERIFICATION.txt) distinguishes real
+signature/predicate execution from untested chain, network and Nitro behavior.
+
 ## Build the Nitro image
 
 ```sh

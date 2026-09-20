@@ -1,5 +1,11 @@
 Unreleased
 
+- Add the Cohort Exit research harness: complete-roster equal-output batches,
+  Taproot key-path settlement while depositors are offline, and independent
+  owner-plus-CSV refunds. autoresearch.sh runs the real in-process ProgramOracle
+  with deterministic public fixtures and measures deposit-inclusive chain
+  cost. Explicitly limit privacy to a toy chain observer; no operator privacy,
+  production wallet, consensus-node validation or global novelty is claimed.
 - Fix the aarch64 enclave startup script to use the image's /bin/sh.
   writeShellScriptBin had prepended an x86_64 build-host Bash interpreter,
   preventing native ARM startup despite a successful EIF build. Rebuild the

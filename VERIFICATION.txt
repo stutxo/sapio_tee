@@ -1,3 +1,62 @@
+SOFTWARE VERIFICATION: COHORT EXIT RESEARCH HARNESS
+
+Command exercised:
+- bash autoresearch.sh: exit 0; executes real inline WASM and ProgramOracle
+  signing, not a compile-only benchmark. Dependencies resolve offline/locked.
+- bash -n autoresearch.sh: exit 0.
+- A second full run after source formatting exited 0 with the identical
+  settlement txid, WASM digest and every metric.
+- cargo check --offline --locked --all-targets --no-default-features: exit 0.
+  Cargo reports an existing proc-macro-error2 future-incompatibility warning.
+- Rust 1.98.1 builds a 2,193-byte guest, compared byte-for-byte to the committed
+  examples/cohort_exit/cohort_exit.wasm before native workload execution.
+- WASM SHA256:
+  742a046d5852d58bfa668f7d6aee3a69d40e8d6e0c99ffa63e1510af91e6f563
+- Settlement txid:
+  0cae53b39310c7bbdb1cd5855d5ec3d3b79439795181280cb29fdc8c3955264c
+- Production source, registry and dependency pins are unchanged.
+
+Executed protocol scenarios:
+- Four distinct Sapio-compiled refundable deposits, each funded by a signed
+  synthetic P2TR transaction. Settlement uses prepare_program_request,
+  deployment::program_oracle, validate_program_response, Miniscript PSBT
+  finalization, and interpreter verification of actual Schnorr signatures.
+- All four inputs spend through key paths (one 65-byte ALL signature each).
+  No depositor signature is needed during settlement. A recipient subsequently
+  spends its payout with its own wallet key.
+- Reordered payouts and uniform fees at the exact 1,000-sat cap sign.
+- Redirection, duplicate payout/missing member, unequal output amounts at an
+  unchanged total fee, cap+1 uniform fees, negative fees, missing input/output,
+  duplicate input outpoint, unexpected evidence and unequal input values fail.
+- Replacing the committed policy cannot authorize original funding.
+- A forged foreign P2TR prevout can produce a signature in the asserted context,
+  but that signature fails verification in the actual prevout context.
+- Every owner's native refund verifies without the oracle. Independently
+  signed transactions with sequence 143, CSV disabled, or an incorrect owner
+  key fail. This checks Script constraints, not elapsed confirmation age.
+- Replaying the original valid settlement after failures gives the identical
+  finalized transaction.
+
+Deterministic metrics:
+  METRIC lifecycle_vbytes_per_user=214.50
+  METRIC settlement_vbytes=414
+  METRIC deposit_vbytes=444
+  METRIC refund_vbytes=138
+  METRIC model_candidate_mappings=24
+  METRIC model_mappings_two_known=2
+  METRIC wasm_bytes=2193
+The primary metric is (four separate deposits + settlement) / four. It excludes
+alternative refunds, subsequent payout spends, wallet change and setup costs.
+Global assignment counts enumerate only the equal-amount/P2TR-type model with
+zero/two known pairs; three known pairs leave one assignment. No measured
+real-world anonymity, entropy guarantee or oracle-host privacy follows.
+
+Unexercised: Bitcoin Core/mempool/chain validation, actual CSV maturity,
+distributed enrollment, remote transport for this example, real Nitro/KMS,
+production wallet UX, privacy proofs and global novelty review. Public fixture
+keys and synthetic UTXOs must never be used for real funds. Existing historical
+verification records below do not extend these research claims.
+
 SOFTWARE VERIFICATION: DURABLE SAFE-WITHDRAWAL EXAMPLE
 
 Source and artifact:
