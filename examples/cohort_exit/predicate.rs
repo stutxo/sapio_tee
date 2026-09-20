@@ -74,8 +74,7 @@ fn evaluate(args: Arguments<'_>) -> Option<bool> {
     // table. The script-length check below still rejects other encodings.
     let inputs = view.take(86 * count)?;
     for (index, bytes) in inputs.chunks_exact(86).enumerate() {
-        let mut input = Reader::new(bytes);
-        let outpoint = input.take(36)?;
+        let outpoint = &bytes[..36];
         if inputs[..index * 86]
             .chunks_exact(86)
             .any(|previous| &previous[..36] == outpoint)
@@ -83,10 +82,13 @@ fn evaluate(args: Arguments<'_>) -> Option<bool> {
             return Some(false);
         }
         // RBF enabled; no input-order or participant-to-output mapping.
-        if input.u32()? != 0xffff_fffd || u64_le(&mut input)? != denomination {
+        let sequence = u32::from_le_bytes(bytes[36..40].try_into().ok()?);
+        let value = u64::from_le_bytes(bytes[40..48].try_into().ok()?);
+        if sequence != 0xffff_fffd || value != denomination {
             return Some(false);
         }
-        if input.u32()? != 34 || input.take(34)?[..2] != [0x51, 0x20] {
+        // script length:u32LE = 34, followed by OP_1 PUSH32.
+        if bytes[48..54] != [34, 0, 0, 0, 0x51, 0x20] {
             return Some(false);
         }
     }
