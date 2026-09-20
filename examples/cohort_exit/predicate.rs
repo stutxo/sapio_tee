@@ -65,18 +65,24 @@ fn evaluate(args: Arguments<'_>) -> Option<bool> {
     if selected >= count || view.u32()? as usize != count {
         return Some(false);
     }
-    let mut outpoints: [&[u8]; 32] = [&[]; 32];
-    for index in 0..count {
-        let outpoint = view.take(36)?;
-        if outpoints[..index].contains(&outpoint) {
+    // A v1 P2TR input is exactly 36+4+8+4+34 bytes. Check the complete
+    // bounded region first, then compare earlier outpoints without a scratch
+    // table. The script-length check below still rejects other encodings.
+    let inputs = view.take(86 * count)?;
+    for (index, bytes) in inputs.chunks_exact(86).enumerate() {
+        let mut input = Reader::new(bytes);
+        let outpoint = input.take(36)?;
+        if inputs[..index * 86]
+            .chunks_exact(86)
+            .any(|previous| &previous[..36] == outpoint)
+        {
             return Some(false);
         }
-        outpoints[index] = outpoint;
         // RBF enabled; no input-order or participant-to-output mapping.
-        if view.u32()? != 0xffff_fffd || u64_le(&mut view)? != denomination {
+        if input.u32()? != 0xffff_fffd || u64_le(&mut input)? != denomination {
             return Some(false);
         }
-        if view.u32()? != 34 || view.take(34)?[..2] != [0x51, 0x20] {
+        if input.u32()? != 34 || input.take(34)?[..2] != [0x51, 0x20] {
             return Some(false);
         }
     }
