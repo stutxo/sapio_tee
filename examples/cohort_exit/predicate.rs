@@ -59,11 +59,14 @@ fn evaluate(args: Arguments<'_>) -> Option<bool> {
     }
 
     let mut view = Reader::new(args.view);
-    if view.u32()? != 2 || view.u32()? != 0 {
+    let header = view.take(16)?;
+    // Version 2 and zero absolute locktime, both little-endian u32.
+    if header[..8] != [2, 0, 0, 0, 0, 0, 0, 0] {
         return Some(false);
     }
-    let selected = view.u32()? as usize;
-    if selected >= count || view.u32()? as usize != count {
+    let selected = u32::from_le_bytes(header[8..12].try_into().ok()?) as usize;
+    let input_count = u32::from_le_bytes(header[12..16].try_into().ok()?) as usize;
+    if selected >= count || input_count != count {
         return Some(false);
     }
     // A v1 P2TR input is exactly 36+4+8+4+34 bytes. Check the complete
