@@ -64,6 +64,20 @@ impl CohortExit {
         self.emulation.clone().into()
     }
 
+    // This key already authorizes settlement. Pinning it removes only the
+    // redundant program leaf, leaving the owner+CSV leaf as the sole refund.
+    #[internal_key]
+    fn program_key(
+        &self,
+        _ctx: &sapio::Context,
+    ) -> Result<Option<XOnlyPublicKey>, sapio::contract::CompilationError> {
+        Ok(Some(
+            self.emulation
+                .derive_public_key()
+                .expect("validated public program root"),
+        ))
+    }
+
     #[spend]
     fn refund(&self) -> Clause {
         Clause::And(vec![
