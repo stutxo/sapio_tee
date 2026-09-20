@@ -1,4 +1,65 @@
-SOFTWARE VERIFICATION: COHORT EXIT RESEARCH HARNESS
+SOFTWARE VERIFICATION: COHORT EXIT RESEARCH ITERATIONS
+
+Retained changes:
+- Explicitly pin the already-authorized program key as Sapio's internal key.
+  The redundant program script leaf disappears; owner+CSV remains native.
+  Single-refund size falls from 138 to 130 vbytes. No new authorization path.
+- Bound the existing 56-byte CE01 parameters and 16-byte signed-view header
+  before decoding fixed fields. Parse already-bounded 86-byte P2TR input
+  records without a scratch outpoint table or redundant per-field readers.
+- Original CE01 encoding, complete-roster predicate, all fee/amount rules,
+  duplicate checks, native refund policy and signer protocol remain unchanged.
+- No modifications to autoresearch.sh, its frozen main.rs workload, production
+  sources, dependency pins, upstream ABI helper or the external research tree.
+
+Measured iterations (all full real-WASM workloads passed):
+  Run 11: initial baseline; refund 138, WASM 2193.
+  Run 12: retain pinned program key; refund 130, WASM 2193.
+  Run 13: retain scratch-free input records; WASM 2168.
+  Run 14: discard output sub-readers; WASM grew to 2250.
+  Run 15: discard hoisted common payout checks; WASM grew to 2206.
+  Run 16: discard CE02 compact-roster experiment; no tracked metric benefit.
+  Run 17: retain bounded parameter header; WASM 2007.
+  Run 18: retain bounded signed-view header; WASM 1863.
+  Run 19: retain direct input field decoding; WASM 1563.
+Every run kept lifecycle_vbytes_per_user=214.50, settlement_vbytes=414,
+deposit_vbytes=444, model_candidate_mappings=24 and model_mappings_two_known=2.
+The primary metric did not improve. For the frozen shapes it is already
+(4 * 111 + 414) / 4 = 214.5 vbytes/user. Refund and WASM changes are secondary
+improvements, not better real-world anonymity or cheaper normal settlement.
+
+Additional validation:
+- A disposable native probe compared pure acceptance against the initial
+  predicate for 181,474 deterministic cases across cohort sizes 2 through 32:
+  valid fixtures with reversed payout order, every view/parameter truncation,
+  one low-bit flip at every byte position, appended bytes, invalid counts,
+  fee/dust boundaries, evidence, and duplicate input/output cases. Retained
+  candidates and final formatted source passed. This finite comparison is not
+  a formal equivalence proof. The disposable probe source/binary were removed.
+- The discarded CE02 experiment used normalized equivalent parameter encodings.
+  Its probe initially used the wrong adapter because of a captured stale flag;
+  explicit encoding selection fixed the probe, after which comparison passed.
+- This probe executes the unchanged pure predicate bodies and shared Reader
+  on the native target, not the WASM ABI or Bitcoin consensus. The canonical
+  benchmark separately runs real WASM and signature/refund checks.
+- Final cargo check --offline --locked --all-targets --no-default-features:
+  exit 0; only the existing proc-macro-error2 future-incompatibility warning.
+- Final canonical run 20 after formatting: exit 0, identical retained run-19
+  WASM digest, settlement txid and all metrics. This completed the ten-run
+  segment including its initial baseline; no iteration-cap reset was used.
+- No privacy assumptions or benchmark checks were weakened. No consensus-node,
+  live chain-maturity, distributed enrollment or Nitro/KMS validation was added.
+
+Retained run-19 artifact:
+  Size: 1,563 bytes (28.7% below 2,193-byte initial guest).
+  SHA256: 51d6114f6cc4eb0b1548d26ed6fde0bce125ed7380aa6373e50fd8744a164dc0
+  Settlement txid:
+  1802a818fc1913074c35a50b18530b7cb52120b7602a69c28691450d609cf398
+Changing program bytes changes derived keys/addresses; these edits do not
+upgrade existing deposits. The earlier initial-harness evidence below is
+historical, not the digest or refund size of the retained implementation.
+
+SOFTWARE VERIFICATION: COHORT EXIT INITIAL HARNESS BASELINE
 
 Command exercised:
 - bash autoresearch.sh: exit 0; executes real inline WASM and ProgramOracle

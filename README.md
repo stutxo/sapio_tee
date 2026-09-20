@@ -122,6 +122,8 @@ the existing ProgramOracle; no participant signs the final batch.
 2. Each user's Sapio contract has two alternatives: the program-derived
    signing key, or that user's signature plus a 144-block CSV delay.
    Different refund keys produce different deposit addresses.
+   The already-authorized program key is explicitly pinned as the internal
+   key, avoiding a redundant program leaf and shortening refund control blocks.
 3. The inline predicate permits exactly the committed number of distinct
    inputs of the agreed denomination, and exactly the complete payout
    roster, each paid the same amount within the fee cap. Output order is
@@ -178,16 +180,24 @@ the witness is empty. The inline ABI and guest bytes also enter the program
 identity. Recompilation does not upgrade existing deposits.
 
 The four-user fixture deposits 100,000 sats each and pays 99,500 sats each,
-with a 1,000-sat per-person cap. Measured baseline:
+with a 1,000-sat per-person cap. Measured retained implementation:
 
 | Metric | Value |
 | --- | ---: |
 | Settlement transaction | 414 vbytes |
 | Four separate deposit transactions | 444 vbytes |
 | Deposit + settlement per user (primary metric) | 214.5 vbytes |
-| Single native refund alternative | 138 vbytes |
+| Single native refund alternative | 130 vbytes |
+| Compiled predicate | 1,563 bytes |
 | Amount/type-only global assignment count | 24 |
 | Assignment count with two known pairs | 2 |
+
+Research iterations reduced refunds from 138 to 130 vbytes and the guest from
+2,193 to 1,563 bytes, while preserving the original `CE01` encoding and all
+acceptance rules. These are **secondary improvements only**. The primary cost
+remains 214.5 vbytes/user: four fixed 111-vbyte deposits plus a 414-vbyte
+settlement, divided by four. Its fixed P2TR transaction shapes and signer
+contract leave no further size reduction without changing the workload.
 
 The primary metric includes the extra deposits rather than hiding that cost;
 it excludes the alternative refund, later recipient spending, change outputs

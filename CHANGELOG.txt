@@ -6,6 +6,10 @@ Unreleased
   with deterministic public fixtures and measures deposit-inclusive chain
   cost. Explicitly limit privacy to a toy chain observer; no operator privacy,
   production wallet, consensus-node validation or global novelty is claimed.
+  Pin the already-authorized program internal key to reduce refunds from
+  138 to 130 vbytes; bound fixed-format decoding to reduce predicate WASM
+  from 2,193 to 1,563 bytes. Preserve the original CE01 encoding, spending
+  rules, frozen benchmark and 214.5-vbyte/user lifecycle cost.
 - Fix the aarch64 enclave startup script to use the image's /bin/sh.
   writeShellScriptBin had prepended an x86_64 build-host Bash interpreter,
   preventing native ARM startup despite a successful EIF build. Rebuild the
