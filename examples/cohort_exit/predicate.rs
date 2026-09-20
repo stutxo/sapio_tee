@@ -31,16 +31,17 @@ fn evaluate(args: Arguments<'_>) -> Option<bool> {
     // Domain, cohort nonce, count, denomination, per-person fee cap, then
     // strictly sorted distinct P2TR scripts. EVERY deposit commits ALL payouts.
     let mut params = Reader::new(args.parameters);
-    if params.take(4)? != b"CE01" {
+    let header = params.take(56)?;
+    if &header[..4] != b"CE01" {
         return None;
     }
-    params.take(32)?;
-    let count = params.u32()? as usize;
+    // The 32-byte nonce occupies header[4..36].
+    let count = u32::from_le_bytes(header[36..40].try_into().ok()?) as usize;
     if !(2..=32).contains(&count) {
         return None;
     }
-    let denomination = u64_le(&mut params)?;
-    let fee_cap = u64_le(&mut params)?;
+    let denomination = u64::from_le_bytes(header[40..48].try_into().ok()?);
+    let fee_cap = u64::from_le_bytes(header[48..56].try_into().ok()?);
     let minimum = denomination.checked_sub(fee_cap)?;
     if minimum < 330 || denomination > 2_100_000_000_000_000 {
         return None;
