@@ -1,7 +1,8 @@
-# Copy to terraform.tfvars and replace subnet, IP, key path and administrator role.
-# The subnet must already have a 0.0.0.0/0 route to an Internet Gateway.
+# Copy to terraform.tfvars and replace IP, key path and administrator role.
+# Leave subnet_id empty to create a dedicated VPC, subnet and Internet Gateway,
+# or supply an existing public subnet with a 0.0.0.0/0 route to one.
 region              = "us-east-1"
-subnet_id           = "subnet-REPLACE"
+subnet_id           = ""
 ssh_cidr            = "203.0.113.10/32"
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 

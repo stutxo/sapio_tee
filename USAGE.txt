@@ -76,8 +76,10 @@ After the initial Terraform init and configuration, terraform apply performs:
    generator's PCR0-bound policy from the outset, without a broad bootstrap grant.
 3. Upload of the image, runner, manifest, scripts and public setup record to a
    private, public-access-blocked S3 bucket under content-addressed keys.
-4. Creation of one AL2023 arm64 m7g.xlarge (4 vCPUs, 16 GiB RAM) with a 20 GiB
-   encrypted gp3 disk, Nitro enabled, IMDSv2 and an EC2 role/profile.
+4. Creation of a dedicated VPC, subnet, Internet Gateway and default route
+   when no existing subnet is supplied, then one AL2023 arm64 m7g.xlarge
+   (4 vCPUs, 16 GiB RAM) with a 20 GiB encrypted gp3 disk, Nitro enabled,
+   IMDSv2 and an EC2 role/profile.
 5. Bootstrap of the Nitro CLI, 2-vCPU / 4096-MiB allocator and host firewall.
    The parent downloads and SHA256-checks the artifacts using its instance role.
 6. Enabling sapio-tee.service, launching the enclave without debug mode, and
@@ -103,16 +105,19 @@ Prerequisites:
   That role needs EC2/IAM provisioning and PassRole, KMS key administration,
   S3 bucket/object management, SSM parameter lookup, DescribeInstanceInformation,
   SendCommand and GetCommandInvocation. Do not supply root credentials.
-- An EXISTING PUBLIC SUBNET with a 0.0.0.0/0 route to an Internet Gateway and
-  suitable network ACLs. A default-VPC public subnet works; a private subnet
-  without outbound access does not. Select a commercial region/AZ with m7g.xlarge.
+- Networking is created for you when subnet_id is left empty: a dedicated VPC,
+  subnet, Internet Gateway and default route. To use an EXISTING PUBLIC SUBNET
+  instead, it must have a 0.0.0.0/0 route to an Internet Gateway and suitable
+  network ACLs. A default-VPC public subnet works; a private subnet without
+  outbound access does not. Select a commercial region/AZ with m7g.xlarge.
 - A public SSH key and your public IPv4 /32, for optional operator access.
 
 From the repository root:
 
   cp deploy/terraform/terraform.tfvars.example deploy/terraform/terraform.tfvars
 
-Edit subnet_id, ssh_cidr, ssh_public_key_path and kms_admin_role_arn; change
+Edit ssh_cidr, ssh_public_key_path and kms_admin_role_arn; leave subnet_id
+empty to create the network, or set it to an existing public subnet; change
 region if needed. The example uses regtest and its public genesis block hash.
 It is a SYNTHETIC TEST configuration: a hash chosen before apply does not
 establish the required future-unpredictable-block chronology, and the

@@ -1,3 +1,29 @@
+SOFTWARE VERIFICATION: OPTIONAL TERRAFORM VPC CREATION
+
+Scope:
+- deploy/terraform: subnet_id is now optional. Empty creates a dedicated VPC,
+  subnet, Internet Gateway, route table and association; a supplied existing
+  public subnet is used instead and no network resources are created. The
+  instance's subnet, security-group VPC and outputs follow either branch.
+- No resources were created and no apply was run. The external EIF build data
+  source was not re-executed; targeting limited plans to network resources.
+
+Commands and scenarios exercised (terraform 1.16.1, one-off nixpkgs shell):
+- fmt -check -recursive and validate passed on the real configuration.
+- Read-only plans against the real AWS account (-refresh=false, network
+  targets only): with subnet_id empty, the plan added exactly the five network
+  resources (VPC, subnet, Internet Gateway, route table, association) and
+  read the region's availability zones. With a subnet_id supplied, the plan
+  changed no real infrastructure and the subnet_id output resolved to the
+  supplied subnet; targeting data.aws_subnet.parent with a nonexistent ID
+  failed with "no matching EC2 Subnet found", proving the lookup branch.
+
+Limitations:
+- No full plan or apply was run; the instance's depends_on ordering across
+  the conditional route association is statically validated, not exercised.
+- The created subnet uses the region's first available AZ; m7g.xlarge
+  availability is an operator region choice, as before.
+
 SOFTWARE VERIFICATION: REVIEW-HARDENING ROUND
 
 Scope:

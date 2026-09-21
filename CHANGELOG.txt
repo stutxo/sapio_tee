@@ -32,8 +32,10 @@ Unreleased
   standalone runner, upload hash-checked artifacts to private S3, create a
   PCR0-bound P256 agreement key, and start/initialize the enclave under systemd.
   Wait for the exact instance's SSM command and matching public identity before
-  reporting apply success. Retain one SSH-restricted m7g.xlarge in an existing
-  public subnet; no NAT, load balancer, SSH private key or parent-side Nix.
+  reporting apply success. Retain one SSH-restricted m7g.xlarge with no NAT,
+  load balancer, SSH private key or parent-side Nix. Networking is optional:
+  leave subnet_id empty to create a dedicated VPC, subnet, Internet Gateway
+  and default route, or supply an existing public subnet.
   Protect the KMS key with prevent_destroy and preserve recovery settings.
   Automatic initialization is test-only operational readiness, not client
   attestation verification or the unpredictable future-block custody procedure.

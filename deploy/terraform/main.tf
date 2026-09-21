@@ -20,8 +20,14 @@ variable "region" {
 }
 
 variable "subnet_id" {
-  description = "Existing public subnet with an Internet Gateway route; no network is created."
+  description = "Existing public subnet with an Internet Gateway route. Leave empty to create a dedicated VPC, subnet, Internet Gateway and route."
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.subnet_id == "" || can(regex("^subnet-[0-9a-f]{8,17}$", var.subnet_id))
+    error_message = "Supply an existing subnet ID, or leave empty to create a dedicated VPC."
+  }
 }
 
 variable "ssh_cidr" {
@@ -86,8 +92,56 @@ provider "aws" {
   }
 }
 
+# With no existing subnet, the test deployment provisions its own minimal
+# public network; nothing here grants the parent instance extra privileges.
+locals {
+  create_vpc = var.subnet_id == ""
+  vpc_id     = local.create_vpc ? aws_vpc.parent[0].id : data.aws_subnet.parent[0].vpc_id
+  subnet_id  = local.create_vpc ? aws_subnet.parent[0].id : var.subnet_id
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_vpc" "parent" {
+  count                = local.create_vpc ? 1 : 0
+  cidr_block           = "10.240.0.0/24"
+  enable_dns_hostnames = true
+}
+
+resource "aws_internet_gateway" "parent" {
+  count  = local.create_vpc ? 1 : 0
+  vpc_id = aws_vpc.parent[0].id
+}
+
+resource "aws_subnet" "parent" {
+  count                   = local.create_vpc ? 1 : 0
+  vpc_id                  = aws_vpc.parent[0].id
+  cidr_block              = "10.240.0.0/25"
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = true
+}
+
+resource "aws_route_table" "parent" {
+  count  = local.create_vpc ? 1 : 0
+  vpc_id = aws_vpc.parent[0].id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.parent[0].id
+  }
+}
+
+resource "aws_route_table_association" "parent" {
+  count          = local.create_vpc ? 1 : 0
+  subnet_id      = aws_subnet.parent[0].id
+  route_table_id = aws_route_table.parent[0].id
+}
+
 data "aws_subnet" "parent" {
-  id = var.subnet_id
+  count = local.create_vpc ? 0 : 1
+  id    = var.subnet_id
 }
 
 data "aws_ssm_parameter" "ami" {
@@ -224,7 +278,7 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 resource "aws_security_group" "parent" {
   name_prefix = "sapio-tee-test-"
   description = "SSH from the operator only; use tunnels for the enclave APIs"
-  vpc_id      = data.aws_subnet.parent.vpc_id
+  vpc_id      = local.vpc_id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "ssh" {
@@ -246,7 +300,7 @@ resource "aws_vpc_security_group_egress_rule" "parent" {
 resource "aws_instance" "parent" {
   ami                         = nonsensitive(data.aws_ssm_parameter.ami.value)
   instance_type               = "m7g.xlarge"
-  subnet_id                   = data.aws_subnet.parent.id
+  subnet_id                   = local.subnet_id
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.parent.id]
   key_name                    = aws_key_pair.parent.key_name
@@ -278,13 +332,16 @@ resource "aws_instance" "parent" {
   })
   user_data_replace_on_change = true
 
-  # All artifacts, permissions and the restrictive KMS policy must precede boot.
+  # All artifacts, permissions, networking and the restrictive KMS policy must
+  # precede boot. The route association is a no-op dependency when an existing
+  # subnet is supplied.
   depends_on = [
     aws_vpc_security_group_egress_rule.parent,
     aws_iam_role_policy.artifacts,
     aws_iam_role_policy_attachment.ssm,
     aws_s3_object.artifacts,
     aws_s3_object.setup,
+    aws_route_table_association.parent,
   ]
 
   tags = {
@@ -337,6 +394,16 @@ output "public_ip" {
 
 output "instance_id" {
   value = aws_instance.parent.id
+}
+
+output "vpc_id" {
+  description = "The supplied subnet's VPC, or the dedicated VPC created for this deployment."
+  value       = local.vpc_id
+}
+
+output "subnet_id" {
+  description = "The subnet the parent instance runs in."
+  value       = local.subnet_id
 }
 
 output "parent_role_arn" {
