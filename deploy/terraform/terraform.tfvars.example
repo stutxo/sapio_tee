@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and replace subnet, IP, key path and administrator role.
+# The subnet must already have a 0.0.0.0/0 route to an Internet Gateway.
+region              = "us-east-1"
+subnet_id           = "subnet-REPLACE"
+ssh_cidr            = "203.0.113.10/32"
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# Terraform must run as this IAM role (not the EC2 role or an STS session ARN).
+kms_admin_role_arn = "arn:aws:iam::123456789012:role/REPLACE"
+
+# Regtest genesis is a PUBLIC TEST FIXTURE, not a future unpredictable block.
+# This one-apply setup is for synthetic tests only. Never fund its contracts.
+# network = "bitcoin" is refused here; use the manual procedure in USAGE.txt.
+network   = "regtest"
+blockhash = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"

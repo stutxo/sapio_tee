@@ -21,6 +21,47 @@ VERIFIER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VERIFIER)
 
 
+def base58check_encode(payload):
+    decoded = payload + hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    number = int.from_bytes(decoded, "big")
+    encoded = ""
+    while number:
+        number, remainder = divmod(number, 58)
+        encoded = VERIFIER.BASE58_ALPHABET[remainder] + encoded
+    for byte in decoded:
+        if byte != 0:
+            break
+        encoded = "1" + encoded
+    return encoded
+
+
+# A structurally valid depth-0 extended public key carrying the secp256k1
+# generator point; no seed exists or is needed for these verification tests.
+def fixture_xpub(version):
+    chain_code = bytes(range(32))
+    generator = bytes.fromhex(
+        "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+    payload = version + b"\x00" + b"\x00" * 8 + chain_code + generator
+    assert len(payload) == 78
+    return base58check_encode(payload)
+
+
+TESTNET_XPUB = fixture_xpub(bytes.fromhex("043587cf"))
+MAINNET_XPUB = fixture_xpub(bytes.fromhex("0488b21e"))
+
+
+def make_certificate(subject_key, subject_common, issuer_key, issuer_common,
+                     not_before, not_after, ca):
+    return (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_common)]))
+            .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_common)]))
+            .public_key(subject_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(not_before).not_valid_after(not_after)
+            .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+            .sign(issuer_key, hashes.SHA384()))
+
+
 class AttestationVerification(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -58,7 +99,7 @@ class AttestationVerification(unittest.TestCase):
             "request_timeout_secs": 30,
         }
         cls.identity = {"protocol": "sapio-tee/program-oracle/1", "mode": "nitro",
-                        "xpub": "fixture-identity", "settings": cls.settings,
+                        "xpub": TESTNET_XPUB, "settings": cls.settings,
                         "signing": cls.program_profile}
         cls.identity_json = json.dumps(cls.identity, separators=(",", ":"))
 
@@ -68,16 +109,20 @@ class AttestationVerification(unittest.TestCase):
                 "cabundle": [self.root.public_bytes(serialization.Encoding.DER)],
                 "nonce": self.nonce, "user_data": hashlib.sha256(self.identity_json.encode()).digest()}
 
-    def signed_response(self, document=None, identity=None):
+    def signed_response(self, document=None, identity=None, protected=None,
+                        unprotected=None, tag=None, signing_key=None):
         identity_json = self.identity_json if identity is None else json.dumps(identity, separators=(",", ":"))
         document = self.document() if document is None else document.copy()
         document["user_data"] = hashlib.sha256(identity_json.encode()).digest()
-        protected = cbor2.dumps({1: -35})
+        protected = cbor2.dumps({1: -35}) if protected is None else protected
+        unprotected = {} if unprotected is None else unprotected
         payload = cbor2.dumps(document)
-        der_sig = self.leaf_key.sign(cbor2.dumps(["Signature1", protected, b"", payload]), ec.ECDSA(hashes.SHA384()))
+        signing_key = self.leaf_key if signing_key is None else signing_key
+        der_sig = signing_key.sign(cbor2.dumps(["Signature1", protected, b"", payload]), ec.ECDSA(hashes.SHA384()))
         r, s = utils.decode_dss_signature(der_sig)
-        cose = cbor2.dumps([protected, {}, payload, r.to_bytes(48, "big") + s.to_bytes(48, "big")])
-        return {"identity_json": identity_json, "document": base64.b64encode(cose).decode()}
+        cose = [protected, unprotected, payload, r.to_bytes(48, "big") + s.to_bytes(48, "big")]
+        encoded = cbor2.dumps(cbor2.CBORTag(tag, cose)) if tag is not None else cbor2.dumps(cose)
+        return {"identity_json": identity_json, "document": base64.b64encode(encoded).decode()}
 
     def verify(self, response, **overrides):
         inputs = dict(response=response, settings=self.settings, program_profile=self.program_profile,
@@ -154,7 +199,7 @@ class AttestationVerification(unittest.TestCase):
 
     def test_xpub_substitution_is_rejected(self):
         response = self.signed_response()
-        response["identity_json"] = self.identity_json.replace("fixture-identity", "attacker-key")
+        response["identity_json"] = self.identity_json.replace(TESTNET_XPUB, MAINNET_XPUB)
         with self.assertRaises(ValueError):
             self.verify(response)
 
@@ -183,6 +228,144 @@ class AttestationVerification(unittest.TestCase):
                       .sign(other_key, hashes.SHA384()))
         with self.assertRaises(Exception):
             self.verify(self.signed_response(), trusted_root=other_root.public_bytes(serialization.Encoding.PEM))
+
+
+    def test_expired_leaf_certificate_is_rejected(self):
+        expired = make_certificate(self.leaf_key, "Expired leaf", self.root_key,
+                                   "Test trust anchor", self.now - timedelta(days=2),
+                                   self.now - timedelta(days=1), ca=False)
+        document = self.document()
+        document["certificate"] = expired.public_bytes(serialization.Encoding.DER)
+        with self.assertRaises(VERIFIER.crypto.X509StoreContextError):
+            self.verify(self.signed_response(document))
+
+    def test_not_yet_valid_leaf_certificate_is_rejected(self):
+        future = make_certificate(self.leaf_key, "Future leaf", self.root_key,
+                                  "Test trust anchor", self.now + timedelta(hours=1),
+                                  self.now + timedelta(days=1), ca=False)
+        document = self.document()
+        document["certificate"] = future.public_bytes(serialization.Encoding.DER)
+        with self.assertRaises(VERIFIER.crypto.X509StoreContextError):
+            self.verify(self.signed_response(document))
+
+    def test_non_ca_issuer_is_rejected(self):
+        intermediate_key = ec.generate_private_key(ec.SECP384R1())
+        intermediate = make_certificate(intermediate_key, "Not a CA", self.root_key,
+                                        "Test trust anchor", self.now - timedelta(days=1),
+                                        self.now + timedelta(days=1), ca=False)
+        leaf = make_certificate(self.leaf_key, "Leaf under non-CA", intermediate_key,
+                                "Not a CA", self.now - timedelta(hours=1),
+                                self.now + timedelta(hours=1), ca=False)
+        document = self.document()
+        document["certificate"] = leaf.public_bytes(serialization.Encoding.DER)
+        document["cabundle"] = [intermediate.public_bytes(serialization.Encoding.DER)]
+        with self.assertRaises(VERIFIER.crypto.X509StoreContextError):
+            self.verify(self.signed_response(document))
+
+    def test_expired_root_in_chain_is_rejected(self):
+        expired_root_key = ec.generate_private_key(ec.SECP384R1())
+        expired_root = make_certificate(expired_root_key, "Expired root", expired_root_key,
+                                        "Expired root", self.now - timedelta(days=2),
+                                        self.now - timedelta(days=1), ca=True)
+        leaf = make_certificate(self.leaf_key, "Leaf under expired root", expired_root_key,
+                                "Expired root", self.now - timedelta(days=2),
+                                self.now + timedelta(days=1), ca=False)
+        document = self.document()
+        document["certificate"] = leaf.public_bytes(serialization.Encoding.DER)
+        document["cabundle"] = [expired_root.public_bytes(serialization.Encoding.DER)]
+        with self.assertRaises(VERIFIER.crypto.X509StoreContextError):
+            self.verify(self.signed_response(document),
+                        trusted_root=expired_root.public_bytes(serialization.Encoding.PEM))
+
+    def test_wrong_curve_certificate_is_rejected(self):
+        p256_key = ec.generate_private_key(ec.SECP256R1())
+        p256_leaf = make_certificate(p256_key, "P-256 leaf", self.root_key,
+                                     "Test trust anchor", self.now - timedelta(hours=1),
+                                     self.now + timedelta(hours=1), ca=False)
+        document = self.document()
+        document["certificate"] = p256_leaf.public_bytes(serialization.Encoding.DER)
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(document))
+
+    def test_future_timestamp_is_rejected(self):
+        document = self.document()
+        document["timestamp"] += 6000
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(document))
+
+    def test_missing_challenge_field_is_rejected(self):
+        document = self.document()
+        del document["nonce"]
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(document))
+
+    def test_wrong_digest_field_is_rejected(self):
+        document = self.document()
+        document["digest"] = "SHA256"
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(document))
+
+    def test_ambiguous_cose_algorithm_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(unprotected={1: -35}))
+
+    def test_non_es384_protected_algorithm_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(protected=cbor2.dumps({1: -37})))
+
+    def test_cose_sign1_tag_is_accepted_and_other_tags_rejected(self):
+        self.assertEqual(self.verify(self.signed_response(tag=18)), self.identity)
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(tag=17))
+
+    def test_trailing_cbor_is_rejected(self):
+        response = self.signed_response()
+        encoded = base64.b64decode(response["document"]) + b"\x00"
+        response["document"] = base64.b64encode(encoded).decode()
+        with self.assertRaises(ValueError):
+            self.verify(response)
+
+    def test_duplicate_json_fields_are_rejected(self):
+        with self.assertRaises(ValueError):
+            VERIFIER.json_value('{"document": "a", "document": "b"}')
+
+    def test_missing_or_partial_measurement_pins_are_rejected(self):
+        response = self.signed_response()
+        cases = [{}, {0: self.pins[0]}, {0: self.pins[0], 1: self.pins[1]},
+                 {"0": self.pins[0], "1": self.pins[1], "2": self.pins[2]}]
+        for pins in cases:
+            with self.subTest(pins=pins), self.assertRaises(ValueError):
+                self.verify(response, pins=pins)
+
+    def test_malformed_xpubs_are_rejected(self):
+        corrupted = TESTNET_XPUB[:-1] + ("1" if TESTNET_XPUB[-1] != "1" else "2")
+        # A structurally complete payload whose x-coordinate is not on secp256k1.
+        bad_point_payload = (bytes.fromhex("043587cf") + b"\x00" + b"\x00" * 8
+                             + bytes(range(32)) + b"\x02" + b"\xff" * 32)
+        cases = ["", "not-an-xpub", corrupted, base58check_encode(bad_point_payload),
+                 TESTNET_XPUB[:-4], 0]
+        for xpub in cases:
+            identity = self.identity | {"xpub": xpub}
+            with self.subTest(xpub=str(xpub)[:40]), self.assertRaises(ValueError):
+                self.verify(self.signed_response(identity=identity))
+
+    def test_cross_network_xpub_is_rejected(self):
+        bitcoin_settings = dict(self.settings, network="bitcoin")
+        # A genuine mainnet-version key under a testnet settings claim.
+        identity = self.identity | {"xpub": MAINNET_XPUB}
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(identity=identity))
+        # A testnet-version key under a matching mainnet claim still fails:
+        # the xpub version must agree with the claimed network.
+        identity = self.identity | {"settings": bitcoin_settings}
+        with self.assertRaises(ValueError):
+            self.verify(self.signed_response(identity=identity), settings=bitcoin_settings)
+
+    def test_mainnet_xpub_with_mainnet_settings_is_accepted(self):
+        bitcoin_settings = dict(self.settings, network="bitcoin")
+        identity = self.identity | {"xpub": MAINNET_XPUB, "settings": bitcoin_settings}
+        result = self.verify(self.signed_response(identity=identity), settings=bitcoin_settings)
+        self.assertEqual(result, identity)
 
 
 if __name__ == "__main__":

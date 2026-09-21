@@ -3,6 +3,10 @@
 //! Anyone can request a full sweep to the committed destination within the fee
 //! cap. This is not an owner-authorized, delayed or recoverable vault.
 
+// sapio::contract::CompilationError is 192 bytes and its signatures are fixed
+// by the upstream contract API; the large Err variant is not ours to shrink.
+#![allow(clippy::result_large_err)]
+
 use anyhow::{Context as _, Result};
 use bitcoin::bip32::Xpub;
 use bitcoin::Script;

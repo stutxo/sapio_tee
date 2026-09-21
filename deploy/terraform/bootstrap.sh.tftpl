@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euo pipefail
+
+# Terraform renders this template; only public artifacts and recovery settings
+# cross the parent. KMS key material is never downloaded or stored here.
+dnf install -y aws-nitro-enclaves-cli python3 iptables-services amazon-ssm-agent
+usermod -aG ne ec2-user
+systemctl enable --now amazon-ssm-agent
+
+# Defense in depth: the runner binds all interfaces; SSH forwards use loopback.
+for firewall in iptables ip6tables; do
+    cat > "/etc/sysconfig/$firewall" <<'RULES'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT ! -i lo -p tcp -m multiport --dports 8000,8367,9999 -j REJECT
+COMMIT
+RULES
+    systemctl enable --now "$firewall"
+done
+
+cat > /etc/nitro_enclaves/allocator.yaml <<'ALLOCATOR'
+---
+cpu_count: 2
+memory_mib: 4096
+ALLOCATOR
+modprobe nitro_enclaves
+systemctl enable nitro-enclaves-allocator.service
+systemctl restart nitro-enclaves-allocator.service
+
+install -d -m 0755 /opt/sapio-tee/deploy
+%{ for name, digest in artifacts ~}
+aws s3 cp --region '${region}' --only-show-errors \
+    's3://${bucket}/${prefix}/${name}' '/opt/sapio-tee/${name}'
+printf '%s\n' '${digest}  /opt/sapio-tee/${name}' | sha256sum --check
+%{ endfor ~}
+aws s3 cp --region '${region}' --only-show-errors \
+    's3://${bucket}/${prefix}/setup.json' /opt/sapio-tee/setup.json
+printf '%s\n' '${setup_sha256}  /opt/sapio-tee/setup.json' | sha256sum --check
+chmod 0555 /opt/sapio-tee/enclaver
+chmod 0644 /opt/sapio-tee/setup.json /opt/sapio-tee/enclaver.yaml \
+    /opt/sapio-tee/deploy/*.py
+install -m 0644 /opt/sapio-tee/sapio-tee.service /etc/systemd/system/sapio-tee.service
+systemctl daemon-reload
+systemctl enable --now sapio-tee.service
+systemctl is-active --quiet sapio-tee.service
+printf '%s\n' 'Sapio enclave started and initialized. Client attestation verification is still required.'

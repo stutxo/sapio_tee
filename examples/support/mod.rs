@@ -96,6 +96,14 @@ pub fn load_identity(options: &Options) -> Result<Identity> {
                 identity.settings.is_object(),
                 "Nitro identity requires settings"
             );
+            // Canary only: the attestation verifier is the real check. A
+            // network/xpub disagreement marks a file no verifier produced.
+            let network: Network = serde_json::from_value(identity.settings["network"].clone())
+                .context("Nitro identity settings need a named network")?;
+            ensure!(
+                identity.xpub.network == network.into(),
+                "Nitro identity xpub does not match its settings network"
+            );
         }
         "local-dev" if options.allow_local_dev => {
             ensure!(

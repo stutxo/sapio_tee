@@ -39,7 +39,10 @@ The signed v1 view is decoded as:
 
 Acceptance requires selected input index zero, exactly one transaction input,
 exactly one output, byte-identical output and committed destination scripts,
-and input_value - output_value in the inclusive range [0, max_fee_satoshis].
+an output value of at least 330 satoshis (the P2TR dust floor: a sweep always
+pays a standard, spendable output, so an under-proportioned deposit cannot be
+burned entirely to fees), and input_value - output_value in the inclusive
+range [0, max_fee_satoshis].
 Subtraction is checked: an output exceeding the input rejects. The complete
 accepted view is consumed. Version, locktime, sequence, and the spent script
 are decoded but impose no additional policy. There is no owner authorization,
@@ -75,6 +78,6 @@ an intentional rebuild and byte verification; the source and binary must travel
 together. No native oracle secret is needed by the client.
 
 Recorded artifact:
-  Size: 1,317 bytes
-  SHA-256: 1348843e73335007c919e8f0e64b897137c903fdda64244daed34611e1fee136
+  Size: 1,309 bytes
+  SHA-256: 061469c24ae73a0cbf1400d6dc57093d60a49143de1c6a0181ba7c3162c378be
 This is a file digest, not the ProgramInstance ID or derived funding key.

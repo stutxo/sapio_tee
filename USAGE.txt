@@ -6,8 +6,9 @@ This repository deploys Sapio's full ProgramOracle with inline WASM v1/v2 and
 a fixed measured pay-at-least/v1 registry. The production process runs inside
 an AWS Nitro Enclave. The parent relays traffic and supplies its instance-role
 credentials to the supervisor;
-it never receives an application seed. No script creates EC2, IAM, KMS, or
-network resources. Review SECURITY.txt before putting funds at risk.
+it never receives an application seed. The optional deploy/terraform configuration
+builds, uploads, provisions and initializes a complete single-box test deployment.
+Review SECURITY.txt before putting funds at risk.
 
 Native x86_64-linux builders are supported; the enclave image itself targets
 aarch64 (Graviton Nitro Enclaves) and the application is cross-compiled for
@@ -56,17 +57,129 @@ pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set,
 and Sapio's tracked evaluators/artifacts are restored beside its vendored
 workspace crates from the exact same Cargo dependency revision. Neither
 adaptation substitutes the signer or attesting proxy.
-The runner must retain its Nix closure on the parent. Use Nix on the parent or
-transfer the closure with Nix tooling; copying a dynamically linked runner
-alone is not a deployment procedure. The standalone EIF can be copied.
+The pinned aarch64-musl parent runner is a standalone static executable; it
+has no ELF interpreter, shared-library dependencies, or Nix store references.
+Copy bin/enclaver and the standalone EIF directly; the parent does not need
+Nix. Recheck those properties if you change the runner build. The closure
+inside the EIF remains part of the image and must not be stripped.
 
 CI runs locked production/local-dev Rust checks, signed attestation fixtures,
 the live ProgramClient demonstration, Nix evaluation, actual musl/runner/EIF
 builds, and uploads build-emitted measurements. CI has no AWS credentials and
 does not prove Nitro boot, hardware attestation, IAM enforcement or KMS access.
 
-Prepare the parent and KMS (operator actions, not automated)
-----------------------------------------------------------
+One-apply Terraform test deployment
+-----------------------------------
+After the initial Terraform init and configuration, terraform apply performs:
+1. A locked local Nix build of the current ARM EIF and static parent runner.
+2. Creation of an ECC_NIST_P256 / KEY_AGREEMENT KMS key using the existing policy
+   generator's PCR0-bound policy from the outset, without a broad bootstrap grant.
+3. Upload of the image, runner, manifest, scripts and public setup record to a
+   private, public-access-blocked S3 bucket under content-addressed keys.
+4. Creation of one AL2023 arm64 m7g.xlarge (4 vCPUs, 16 GiB RAM) with a 20 GiB
+   encrypted gp3 disk, Nitro enabled, IMDSv2 and an EC2 role/profile.
+5. Bootstrap of the Nitro CLI, 2-vCPU / 4096-MiB allocator and host firewall.
+   The parent downloads and SHA256-checks the artifacts using its instance role.
+6. Enabling sapio-tee.service, launching the enclave without debug mode, and
+   initializing it with the configured key ARN, blockhash and network.
+7. Waiting for Systems Manager to register THIS instance, then checking a real
+   per-instance command's exit status, service health and matching public
+   identity. Bootstrap, KMS/setup, timeout or identity errors fail apply.
+
+This remains ONE EC2 box, with no NAT gateway, load balancer or Elastic IP.
+The added S3 bucket and KMS key incur their normal small storage/key charges.
+Only SSH is admitted from your IPv4 /32; both the security group and IPv4/IPv6
+host firewall block direct signer-port access. Deployment uses S3/Systems
+Manager, not SSH provisioners: Terraform never needs an SSH private key.
+The EC2 role has only this bucket's GetObject permission, the AWS-managed SSM
+core policy, and the specific attested KMS grant; it is not the administrator.
+
+Prerequisites:
+- An x86_64 Linux workstation with Nix, Python >= 3.9, Terraform >= 1.7 and < 2,
+  AWS CLI v2, and normal locally configured AWS credentials (e.g. AWS_PROFILE).
+  No manual nix build, scp, key-policy upload or SSH launch is needed.
+- Run Terraform as the existing same-account IAM role given by
+  kms_admin_role_arn. Supply its IAM ARN, NOT its temporary STS session ARN.
+  That role needs EC2/IAM provisioning and PassRole, KMS key administration,
+  S3 bucket/object management, SSM parameter lookup, DescribeInstanceInformation,
+  SendCommand and GetCommandInvocation. Do not supply root credentials.
+- An EXISTING PUBLIC SUBNET with a 0.0.0.0/0 route to an Internet Gateway and
+  suitable network ACLs. A default-VPC public subnet works; a private subnet
+  without outbound access does not. Select a commercial region/AZ with m7g.xlarge.
+- A public SSH key and your public IPv4 /32, for optional operator access.
+
+From the repository root:
+
+  cp deploy/terraform/terraform.tfvars.example deploy/terraform/terraform.tfvars
+
+Edit subnet_id, ssh_cidr, ssh_public_key_path and kms_admin_role_arn; change
+region if needed. The example uses regtest and its public genesis block hash.
+It is a SYNTHETIC TEST configuration: a hash chosen before apply does not
+establish the required future-unpredictable-block chronology, and the
+configuration refuses network = "bitcoin" outright. Do not fund it.
+For a custody deployment, use the separately reviewed manual policy/future-block
+procedure below, independently verified measurements and attestation.
+
+  terraform -chdir=deploy/terraform init
+  terraform -chdir=deploy/terraform apply
+
+Review and accept the plan. A separate terraform plan is optional. Planning
+also builds locally because the image measurements are needed for the policy;
+the first build can take substantial time. The helper uses current locked
+flake outputs, not stale result-* links, and roots them in .local/terraform/.
+The parent does not install Nix or compile anything. Do not remove those local
+GC roots while a saved plan still references their outputs.
+
+State, local variable files and saved *.tfplan files are ignored; preserve
+state securely and keep .terraform.lock.hcl under version control. No private
+root, KMS key material, AWS credentials or SSH private keys are Terraform inputs.
+The public setup record and key ARN are state/output data.
+
+After deployment, save the public recovery inputs:
+
+  terraform -chdir=deploy/terraform output -json recovery_settings > setup.json
+  terraform -chdir=deploy/terraform output -json measurements > measurements.json
+  terraform -chdir=deploy/terraform output -raw ssh_tunnel
+
+Run the printed tunnel command in a separate terminal and keep it open.
+If using a nondefault SSH key, load it into your agent or add -i to that command.
+Keep SSH host-key verification enabled. Use API_URL=http://127.0.0.1:8000 and
+127.0.0.1:8367 for ProgramClient. Setup has ALREADY run: do not repeat the
+manual POST /setup. Continue with the independent attestation-verification
+section below. Successful apply is an operational readiness check, NOT
+cryptographic verification of the parent, root, or signing profile.
+
+The systemd service restarts on failure and reinitializes from the same public
+settings on a new process or parent reboot; it refuses a mismatched identity.
+Stopping/starting EC2 can change its public IP: use apply -refresh-only and
+read public_ip again before tunneling. No manual enclave launch is needed.
+AMI, artifact, setup or bootstrap changes can replace the disposable parent
+on a later apply. Changing key ARN, blockhash or network changes the root.
+
+If apply fails, inspect /var/log/cloud-init-output.log, the Systems Manager
+command output, and journalctl -u sapio-tee.service on the instance. Correct
+the cause and replace a failed-bootstrap parent with:
+
+  terraform -chdir=deploy/terraform apply -replace=aws_instance.parent
+
+A readiness-only failure taints terraform_data.ready; after correcting access
+or connectivity, the next apply retries that check without rebuilding the box.
+The checks run for new/replaced deployments, not as a continuous monitor of
+an unchanged stack. Do not interpret a no-change plan as a live health check.
+
+KEY DELETION SAFETY: aws_kms_key.oracle has prevent_destroy = true. A normal
+terraform destroy is intentionally BLOCKED rather than deleting the recovery
+key. Stop EC2 to halt compute charges while retaining the root; disk, S3 and
+KMS remain billable. For a fully disposable test with no funds/recovery needs,
+explicitly remove that lifecycle guard, review terraform destroy, and confirm:
+it deletes the host/artifacts/role and schedules KMS deletion after 30 days.
+Once deleted, that key/root cannot be recovered. Never destroy a funded root.
+
+Real EC2 boot, live KMS access, Nitro attestation and hardware restart/recovery
+still require AWS integration validation. Use synthetic transactions only.
+
+Prepare the parent and KMS manually
+----------------------------------
 Use an enclave-enabled aarch64 (Graviton) Nitro EC2 instance with sufficient
 spare whole CPU cores and memory. Install nitro-cli and the Nitro driver,
 configure access to /dev/nitro_enclaves (normally the ne group), and configure the allocator in
@@ -227,7 +340,7 @@ to the trusted PEM path, and PCR0, PCR1, PCR2 to reviewed independent values.
 On your trusted verifier:
 
   python3 -m venv .venv-verifier
-  .venv-verifier/bin/pip install -r requirements-verifier.txt
+  .venv-verifier/bin/pip install --require-hashes -r requirements-verifier.txt
   .venv-verifier/bin/python scripts/verify-attestation.py \
     --response attestation.json --settings setup.json --nonce "$NONCE" \
     --program-profile expected-program-profile.json \
@@ -235,8 +348,11 @@ On your trusted verifier:
     > verified-identity.json
 
 The helper verifies the chain, COSE ES384 signature, certificate time, freshness,
-nonzero PCR pins, challenge, exact identity digest, identity protocol,
+all three nonzero PCR pins (a property of the verifier itself, not its CLI),
+challenge, exact identity digest, identity protocol,
 production mode, exact expected settings and exact expected signing profile.
+It also base58check-parses the verified xpub, requiring a BIP32 version that
+matches the claimed settings network and a valid secp256k1 public key.
 Use a trustworthy verifier clock. Pin the verified xpub in ProgramClient
 independently of later unauthenticated /public-key responses.
 If you already have a recovery xpub, compare it as an additional continuity
@@ -346,7 +462,8 @@ Against Nitro, use the independently verified identity and omit the bypass:
     --address PARENT_IP:8367 --identity verified-identity.json
 
 Both invocations still use synthetic funding and never broadcast. The example
-allows a full sweep to one fixed script with at most a 1,000-sat fee; anyone
+allows a full sweep to one fixed script with at most a 1,000-sat fee, always
+paying at least the 330-satoshi P2TR dust floor; anyone
 may trigger an allowed spend. There is no owner authorization, delay, recovery,
 partial withdrawal or change. It is not a wallet or a production recovery vault.
 All successful responses are signature-checked and finalized; negative cases

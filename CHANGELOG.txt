@@ -1,15 +1,45 @@
 Unreleased
 
-- Add the Cohort Exit research harness: complete-roster equal-output batches,
-  Taproot key-path settlement while depositors are offline, and independent
-  owner-plus-CSV refunds. autoresearch.sh runs the real in-process ProgramOracle
-  with deterministic public fixtures and measures deposit-inclusive chain
-  cost. Explicitly limit privacy to a toy chain observer; no operator privacy,
-  production wallet, consensus-node validation or global novelty is claimed.
-  Pin the already-authorized program internal key to reduce refunds from
-  138 to 130 vbytes; bound fixed-format decoding to reduce predicate WASM
-  from 2,193 to 1,563 bytes. Preserve the original CE01 encoding, spending
-  rules, frozen benchmark and 214.5-vbyte/user lifecycle cost.
+- Harden the attestation verifier after independent review: verify() itself
+  now requires exactly the PCR0/1/2 pin set rather than relying on its CLI
+  caller, and the verified xpub is base58check-decoded, matched against the
+  BIP32 version bytes of the claimed settings network, and required to carry a
+  valid secp256k1 key. Fix tag-18-wrapped COSE documents failing closed on
+  cbor2's frozendict decoding of the tagged unprotected header. Add negative
+  certificate-path tests (expired/not-yet-valid leaf, non-CA issuer, expired
+  root, wrong curve) and rejection tests for future timestamps, missing
+  challenge, wrong digest, ambiguous or non-ES384 COSE algorithms, non-Sign1
+  tags, duplicate JSON fields, trailing CBOR, malformed/cross-network xpubs
+  and missing/partial measurement pins; 27 tests total.
+- Repair and hash-pin the verifier requirements: pyOpenSSL==26.3.0 declares
+  cryptography<50, so the previous cryptography==50.0.0 pin could not resolve.
+  Pin the compatible pyOpenSSL==26.4.0 / cryptography==50.0.1 pair plus the
+  full cffi/pycparser/typing-extensions closure with per-artifact SHA-256
+  hashes, and install with pip --require-hashes. Verified by a fresh-venv
+  hash-enforced install running the complete attestation test suite.
+- Bound the vault sweep output to at least 330 satoshis (the P2TR dust floor):
+  a sweep must always pay a standard, spendable output to the committed
+  destination, so an under-proportioned deposit cannot be burned entirely to
+  fees by the permissionless settler. Rebuilt vault.wasm (1,309 bytes, sha256
+  061469c24ae73a0cbf1400d6dc57093d60a49143de1c6a0181ba7c3162c378be), updated
+  its provenance, and added reject/accept boundary cases to the live example.
+  The program identity changes; no funded contract exists to migrate.
+- Refuse network = "bitcoin" in the one-apply Terraform test workflow; mainnet
+  custody requires the manual future-block procedure. The example client now
+  cross-checks a Nitro identity's xpub network against its settings.
+
+- Make the Terraform test deployment end-to-end: build the pinned ARM EIF and
+  standalone runner, upload hash-checked artifacts to private S3, create a
+  PCR0-bound P256 agreement key, and start/initialize the enclave under systemd.
+  Wait for the exact instance's SSM command and matching public identity before
+  reporting apply success. Retain one SSH-restricted m7g.xlarge in an existing
+  public subnet; no NAT, load balancer, SSH private key or parent-side Nix.
+  Protect the KMS key with prevent_destroy and preserve recovery settings.
+  Automatic initialization is test-only operational readiness, not client
+  attestation verification or the unpredictable future-block custody procedure.
+- Remove the autoresearch harness and the cohort-exit research example: the
+  research line is finished, and the launch repository should not carry its
+  scaffolding. The work remains in git history on the merged branch.
 - Fix the aarch64 enclave startup script to use the image's /bin/sh.
   writeShellScriptBin had prepended an x86_64 build-host Bash interpreter,
   preventing native ARM startup despite a successful EIF build. Rebuild the

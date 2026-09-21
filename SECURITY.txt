@@ -44,6 +44,21 @@ policies, roles, grants, SCPs, instance profiles or a cloud account. Review and
 test the installed policy in your own account. Never weaken conditions merely
 to make a request succeed.
 
+Terraform's test workflow calls this same generator before CreateKey, when no
+key ARN exists yet; it uses Resource "*" on the newly created key and no broad
+intermediate policy. The named administrator must be the role running Terraform.
+The parent additionally reads its private artifact bucket and uses Systems
+Manager; neither permission grants KMS administration. SHA256-checked uploads
+and a successful per-instance readiness command establish operational startup,
+not enclave attestation or an authenticated xpub. The local builder, source,
+Terraform state and administrator remain trusted deployment inputs.
+
+The one-apply example supplies a public regtest genesis hash before creating
+the key. It deliberately does NOT prove future-block chronology and must only
+be used for synthetic tests without funds. The future-block requirement below
+is unchanged. Terraform's prevent_destroy guard prevents accidental key deletion
+through that configuration, not deletion by a privileged AWS administrator.
+
 The admin role can replace/remove the deny statements with PutKeyPolicy.
 Policy mutation, role takeover, admin-parent collusion, key deletion, and
 historic derivation before a restrictive policy was installed are outside a
@@ -142,44 +157,6 @@ upgrade can make funds unspendable. Policy-admitted old vulnerable images
 remain a recovery/extraction risk. Independent transaction timelocks,
 threshold custodians or recovery paths are deployment decisions, not features
 silently provided by this service.
-
-Cohort Exit research boundary
------------------------------
-examples/cohort_exit is a synthetic, in-process protocol workload, not a
-production wallet, enrollment service, private channel or reviewed mixer.
-Every fixture private key, including the oracle root, is public. Never fund
-its addresses. It adds no production endpoint or evaluator registry entry.
-
-Each deposit commits the entire distinct payout roster, denomination, common
-per-user fee cap and cohort nonce. A user must verify their own fresh receiving
-key and native refund key, complete manifest, and trusted oracle root before
-funding; the harness does not implement multi-party enrollment or authenticate
-participants. The same fee is deducted from each payout, but anyone may choose
-the permitted maximum. No fee-market oracle or relayer compensation is supplied.
-
-Foreign input values/scripts are caller assertions until checked against real
-UTXOs. SIGHASH_ALL prevents a signature over invented prevouts from validating
-against different real coins. Nevertheless, genuine equal-value P2TR inputs
-can replace original cohort members while preserving every promised payout.
-The predicate does not prove input ownership, independent people, original
-cohort membership, funding confirmations or that all inputs remain unspent.
-
-The oracle can sign conflicting authorized settlements without state. Bitcoin
-UTXO consumption, not enclave rollback resistance, decides which can confirm.
-The 144-block owner CSV path permits recovery without the oracle after actual
-chain maturity; it does not turn off settlement then. Recovery races with any
-signed settlement until confirmation. It cannot stop a compromised oracle
-from signing theft under the bare program key before the owner recovers.
-
-Key-path settlement need not disclose refund scripts or a payout assignment,
-but amounts and the joint transaction graph are public. Setup transcripts and
-transport metadata may reveal every association to the coordinator/host.
-Sybil participation, collusion, timing, address labels/reuse and consolidation
-can eliminate privacy. The harness's 24 compatible assignments (two after two
-known pairs, one after three) assume only amounts and script types are known;
-they are not a proof or empirical estimate of anonymity. Native Script checks
-do not prove transaction-chain acceptance or elapsed confirmation age. See
-VERIFICATION.txt for exactly the functionality exercised.
 
 Reference provenance and verification status
 -------------------------------------------

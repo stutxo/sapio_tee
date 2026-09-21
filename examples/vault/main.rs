@@ -178,6 +178,37 @@ async fn main() -> Result<()> {
     negative_fee.psbt.0.unsigned_tx.output[0].value = Amount::from_sat(FUNDING_SATS + 1);
     rejected(&client, negative_fee, "outputs exceed input by 1 sat").await?;
 
+    // The dust floor is independent of the fee cap: with an under-proportioned
+    // deposit, an output below 330 sats is refused although the fee is in cap.
+    // Values ride in witness_utxo; commitment, outpoint and script are unchanged.
+    let mut dust = original.clone();
+    dust.psbt.0.inputs[0]
+        .witness_utxo
+        .as_mut()
+        .context("missing funding witness")?
+        .value = Amount::from_sat(MAX_FEE_SATS + 200);
+    dust.psbt.0.unsigned_tx.output[0].value = Amount::from_sat(200);
+    rejected(
+        &client,
+        dust,
+        "200-sat sweep output below the 330-sat dust floor, in-cap fee",
+    )
+    .await?;
+
+    let mut dust_boundary = original.clone();
+    dust_boundary.psbt.0.inputs[0]
+        .witness_utxo
+        .as_mut()
+        .context("missing funding witness")?
+        .value = Amount::from_sat(MAX_FEE_SATS + 330);
+    dust_boundary.psbt.0.unsigned_tx.output[0].value = Amount::from_sat(330);
+    accepted(
+        &client,
+        &dust_boundary,
+        "330-sat dust-floor boundary output with in-cap fee",
+    )
+    .await?;
+
     let mut extra_output = original.clone();
     extra_output.psbt.0.unsigned_tx.output[0].value -= Amount::ONE_SAT;
     extra_output.psbt.0.unsigned_tx.output.push(TxOut {

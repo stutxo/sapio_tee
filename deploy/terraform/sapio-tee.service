@@ -1,0 +1,24 @@
+[Unit]
+Description=Sapio Nitro Enclave test signer
+Wants=network-online.target
+Requires=nitro-enclaves-allocator.service
+After=network-online.target nitro-enclaves-allocator.service
+
+[Service]
+Type=exec
+User=ec2-user
+Group=ec2-user
+SupplementaryGroups=ne
+WorkingDirectory=/opt/sapio-tee
+ExecStart=/usr/bin/python3 /opt/sapio-tee/deploy/run-enclave.py --eif /opt/sapio-tee/sapio_tee.eif --runner /opt/sapio-tee/enclaver --cpu-count 2 --memory-mib 4096
+ExecStartPost=/usr/bin/python3 /opt/sapio-tee/deploy/initialize.py --settings /opt/sapio-tee/setup.json --timeout 120
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=60
+KillMode=mixed
+# The pinned runner reports graceful cancellation as exit 109.
+SuccessExitStatus=109
+
+[Install]
+WantedBy=multi-user.target

@@ -1,122 +1,181 @@
-SOFTWARE VERIFICATION: COHORT EXIT RESEARCH ITERATIONS
+SOFTWARE VERIFICATION: REVIEW-HARDENING ROUND
 
-Retained changes:
-- Explicitly pin the already-authorized program key as Sapio's internal key.
-  The redundant program script leaf disappears; owner+CSV remains native.
-  Single-refund size falls from 138 to 130 vbytes. No new authorization path.
-- Bound the existing 56-byte CE01 parameters and 16-byte signed-view header
-  before decoding fixed fields. Parse already-bounded 86-byte P2TR input
-  records without a scratch outpoint table or redundant per-field readers.
-- Original CE01 encoding, complete-roster predicate, all fee/amount rules,
-  duplicate checks, native refund policy and signer protocol remain unchanged.
-- No modifications to autoresearch.sh, its frozen main.rs workload, production
-  sources, dependency pins, upstream ABI helper or the external research tree.
+Scope:
+- Post-review hardening of the attestation verifier, its dependencies, the
+  example predicates, and the Terraform test workflow. No enclave image,
+  production source, KMS policy, derivation or registry change: src/ and
+  evaluators/ are untouched and EIF measurements are unaffected.
+- No AWS resources were created; no Nitro hardware was used. All results are
+  local software evidence on the development workstation.
 
-Measured iterations (all full real-WASM workloads passed):
-  Run 11: initial baseline; refund 138, WASM 2193.
-  Run 12: retain pinned program key; refund 130, WASM 2193.
-  Run 13: retain scratch-free input records; WASM 2168.
-  Run 14: discard output sub-readers; WASM grew to 2250.
-  Run 15: discard hoisted common payout checks; WASM grew to 2206.
-  Run 16: discard CE02 compact-roster experiment; no tracked metric benefit.
-  Run 17: retain bounded parameter header; WASM 2007.
-  Run 18: retain bounded signed-view header; WASM 1863.
-  Run 19: retain direct input field decoding; WASM 1563.
-Every run kept lifecycle_vbytes_per_user=214.50, settlement_vbytes=414,
-deposit_vbytes=444, model_candidate_mappings=24 and model_mappings_two_known=2.
-The primary metric did not improve. For the frozen shapes it is already
-(4 * 111 + 414) / 4 = 214.5 vbytes/user. Refund and WASM changes are secondary
-improvements, not better real-world anonymity or cheaper normal settlement.
+Changes verified:
+- scripts/verify-attestation.py: verify() itself now requires exactly the
+  PCR0/1/2 pin set (no longer a CLI-caller convention), validates the settings
+  shape, and base58check-decodes the verified xpub, requiring the BIP32 version
+  bytes of the claimed settings network and a valid secp256k1 point. Tag-18
+  wrapped COSE documents no longer fail closed on cbor2's frozendict decoding
+  of the tagged unprotected header; both wrapped and bare documents verify.
+- tests/test_attestation.py: 27 tests (10 prior plus 17 new), adding negative
+  certificate-path fixtures (expired leaf, not-yet-valid leaf, non-CA issuer,
+  expired root in the chain, P-256 leaf), future timestamp, missing nonce,
+  wrong digest, ambiguous and non-ES384 COSE algorithm headers, COSE tag 17
+  rejection and tag 18 acceptance, trailing CBOR, duplicate JSON fields,
+  empty/partial/string-keyed pin sets, malformed/corrupt/off-curve xpubs,
+  cross-network xpub claims, and a mainnet-xpub-with-mainnet-settings
+  positive. All 27 pass under the Nix dev shell and under a fresh
+  hash-enforced venv built from requirements-verifier.txt
+  (uv pip install --require-hashes, Python 3.13).
+- requirements-verifier.txt: regenerated with per-artifact SHA-256 hashes for
+  the full resolved closure (cbor2 6.1.3, cffi 2.1.1, cryptography 50.0.1,
+  pycparser 3.0, pyOpenSSL 26.4.0, typing-extensions 4.16.0). The previous
+  pins did not resolve: pyOpenSSL 26.3.0 declares cryptography<50 while the
+  file pinned cryptography==50.0.0. The hash-enforced fresh-venv install plus
+  full test run above is the evidence the file installs as shipped.
+- examples/vault: the predicate now requires the sweep output to reach the
+  330-satoshi P2TR dust floor, so an under-proportioned deposit cannot be
+  burned entirely to fees by the permissionless settler. Rebuilt vault.wasm
+  with the documented recipe: 1,309 bytes, sha256
+  061469c24ae73a0cbf1400d6dc57093d60a49143de1c6a0181ba7c3162c378be;
+  build.sh --check reproduces it byte-identically. The previous rule accepted
+  the new rejection case (by inspection of the removed condition: the in-cap
+  1,000-sat fee passed and no floor existed).
+- examples/support/mod.rs: Nitro identities must carry a settings network
+  whose BIP32 version matches the xpub. Local-dev behavior unchanged.
+- examples/vault/contract.rs: targeted clippy allowance for the upstream
+  192-byte sapio::contract::CompilationError, restoring the documented clippy
+  command below to a pass (the lint fired on HEAD before this round; the file
+  was unchanged by it). The same allowance briefly existed in the cohort-exit
+  research contract, which has since been removed from the repository.
+- deploy/terraform: the network variable now refuses "bitcoin" in the
+  one-apply test workflow.
 
-Additional validation:
-- A disposable native probe compared pure acceptance against the initial
-  predicate for 181,474 deterministic cases across cohort sizes 2 through 32:
-  valid fixtures with reversed payout order, every view/parameter truncation,
-  one low-bit flip at every byte position, appended bytes, invalid counts,
-  fee/dust boundaries, evidence, and duplicate input/output cases. Retained
-  candidates and final formatted source passed. This finite comparison is not
-  a formal equivalence proof. The disposable probe source/binary were removed.
-- The discarded CE02 experiment used normalized equivalent parameter encodings.
-  Its probe initially used the wrong adapter because of a captured stale flag;
-  explicit encoding selection fixed the probe, after which comparison passed.
-- This probe executes the unchanged pure predicate bodies and shared Reader
-  on the native target, not the WASM ABI or Bitcoin consensus. The canonical
-  benchmark separately runs real WASM and signature/refund checks.
-- Final cargo check --offline --locked --all-targets --no-default-features:
-  exit 0; only the existing proc-macro-error2 future-incompatibility warning.
-- Final canonical run 20 after formatting: exit 0, identical retained run-19
-  WASM digest, settlement txid and all metrics. This completed the ten-run
-  segment including its initial baseline; no iteration-cap reset was used.
-- No privacy assumptions or benchmark checks were weakened. No consensus-node,
-  live chain-maturity, distributed enrollment or Nitro/KMS validation was added.
+Commands exercised and passing on this workstation:
+- cargo fmt --all -- --check
+- cargo clippy --locked --all-targets --all-features -- -D warnings
+- cargo test --locked --no-default-features and --features local-dev: 4/4 each
+- python3 -m unittest discover -s tests -p 'test_*.py': 27/27, run twice (Nix
+  dev shell and the hash-enforced requirements venv)
+- terraform 1.16.1 (one-off nixpkgs shell): fmt -check -recursive and validate
+  on the real configuration; the network guard was additionally exercised in
+  an isolated providerless module: "bitcoin" is refused with the future-block
+  message, an unknown network is refused by the allowlist, and "regtest"
+  plans successfully. No AWS-backed plan/apply was run; the external build
+  data source was not re-executed.
+- bash examples/vault/build.sh --check: byte-identical rebuild
+- Live --local-dev ProgramClient exercises in an isolated network namespace
+  (port 8000 was held by an unrelated process on this host): program_oracle
+  passed all 17 scenarios and vault all 13, including the new boundary pair:
+  a 200-sat sweep output from a 1,200-sat deposit with an in-cap fee is now a
+  typed remote rejection, and the 330-sat dust-floor boundary signs,
+  finalizes and extracts.
 
-Retained run-19 artifact:
-  Size: 1,563 bytes (28.7% below 2,193-byte initial guest).
-  SHA256: 51d6114f6cc4eb0b1548d26ed6fde0bce125ed7380aa6373e50fd8744a164dc0
-  Settlement txid:
-  1802a818fc1913074c35a50b18530b7cb52120b7602a69c28691450d609cf398
-Changing program bytes changes derived keys/addresses; these edits do not
-upgrade existing deposits. The earlier initial-harness evidence below is
-historical, not the digest or refund size of the retained implementation.
+Limitations:
+- The new verifier checks are software-tested with synthetic fixtures; no
+  genuine AWS Nitro document has been parsed. The tag-18 acceptance path
+  mirrors the real encoding, but hardware interop remains unverified.
+- The CI workflow edit was not executed here; GitHub Actions runs it.
+- Nothing in this round changes the documented hardware boundary: live Nitro
+  boot, real NSM attestation, KMS policy enforcement and restart/recovery
+  remain unexercised and are required before production custody.
 
-SOFTWARE VERIFICATION: COHORT EXIT INITIAL HARNESS BASELINE
+SOFTWARE VERIFICATION: ONE-APPLY TERRAFORM TEST DEPLOYMENT
 
-Command exercised:
-- bash autoresearch.sh: exit 0; executes real inline WASM and ProgramOracle
-  signing, not a compile-only benchmark. Dependencies resolve offline/locked.
-- bash -n autoresearch.sh: exit 0.
-- A second full run after source formatting exited 0 with the identical
-  settlement txid, WASM digest and every metric.
-- cargo check --offline --locked --all-targets --no-default-features: exit 0.
-  Cargo reports an existing proc-macro-error2 future-incompatibility warning.
-- Rust 1.98.1 builds a 2,193-byte guest, compared byte-for-byte to the committed
-  examples/cohort_exit/cohort_exit.wasm before native workload execution.
-- WASM SHA256:
-  742a046d5852d58bfa668f7d6aee3a69d40e8d6e0c99ffa63e1510af91e6f563
-- Settlement txid:
-  0cae53b39310c7bbdb1cd5855d5ec3d3b79439795181280cb29fdc8c3955264c
-- Production source, registry and dependency pins are unchanged.
+Scope:
+- Extend the earlier host-only Terraform configuration into local artifact
+  build, private S3 upload, attestation-bound KMS key creation, systemd launch
+  and initialization, and exact-instance SSM readiness checking.
+- No AWS resources were created or AWS account API calls made. Terraform AWS
+  operations and SSM responses were simulated. The Nix build, policy generator,
+  HTTP initializer, readiness CLI, shell execution and checksum checks were real.
+- Production Rust, enclave protocol and derivation settings are unchanged.
 
-Executed protocol scenarios:
-- Four distinct Sapio-compiled refundable deposits, each funded by a signed
-  synthetic P2TR transaction. Settlement uses prepare_program_request,
-  deployment::program_oracle, validate_program_response, Miniscript PSBT
-  finalization, and interpreter verification of actual Schnorr signatures.
-- All four inputs spend through key paths (one 65-byte ALL signature each).
-  No depositor signature is needed during settlement. A recipient subsequently
-  spends its payout with its own wallet key.
-- Reordered payouts and uniform fees at the exact 1,000-sat cap sign.
-- Redirection, duplicate payout/missing member, unequal output amounts at an
-  unchanged total fee, cap+1 uniform fees, negative fees, missing input/output,
-  duplicate input outpoint, unexpected evidence and unequal input values fail.
-- Replacing the committed policy cannot authorize original funding.
-- A forged foreign P2TR prevout can produce a signature in the asserted context,
-  but that signature fails verification in the actual prevout context.
-- Every owner's native refund verifies without the oracle. Independently
-  signed transactions with sequence 143, CSV disabled, or an incorrect owner
-  key fail. This checks Script constraints, not elapsed confirmation age.
-- Replaying the original valid settlement after failures gives the identical
-  finalized transaction.
+Commands and scenarios exercised:
+- Terraform 1.16.1: fmt, init -backend=false -input=false, and validate passed
+  with signed hashicorp/aws 6.66.0 and hashicorp/external 2.4.2 providers.
+  The provider lock is retained.
+- Ran deploy/terraform/build.py through nix develop with the current repository.
+  It built the real .#eif and .#enclaver with the flake lock unchanged, returning
+  nonzero PCR0/PCR1/PCR2 and a 92,229,617-byte EIF. Its architecture check accepted
+  the current static ARM runner and rejected the stale x86_64 result-runner.
+- Four temporary mocked-provider plans passed: the complete deployment graph,
+  rejection of world-open SSH, rejection of the zero recovery block hash, and
+  rejection of an STS session ARN as the KMS administrator.
+- A temporary mocked-provider apply passed, including real external-policy
+  generation and the terraform_data local-exec provisioner. The latter actually
+  called the simulated AWS CLI's describe-instance-information, send-command and
+  get-command-invocation operations for the selected instance.
+- Existing-key CLI and pre-CreateKey external-provider modes generated identical
+  KMS policy statements. Zero PCR0, cross-account or identical admin/parent roles,
+  and unexpected external query fields were rejected.
+- Eleven real HTTP initializer scenarios passed: fresh setup, idempotent restart,
+  concurrent setup, transient KMS failure, an 11-second setup response without a
+  premature retry, mismatched settings, local-dev mode, malformed identity,
+  invalid setup, persistent unhealthy status, and persistent KMS failure.
+  Failure cases exited nonzero; the configured deadlines bounded retries.
+- Six readiness CLI scenarios passed against simulated AWS CLI responses:
+  success, delayed registration with an unrelated online instance, eventual
+  command visibility, failed command, mismatched identity despite a successful
+  command status, and access denial. Only the matching successful invocation
+  with the expected public identity reported readiness.
+- Rendered the actual bootstrap template through Terraform using hashes of the
+  real artifacts. bash -n and ShellCheck 0.11.0 passed. In isolated temporary
+  filesystems, bootstrap copied and hash-checked all artifacts and setup.json,
+  installed the actual service unit, and ran its real ExecStartPost initializer
+  against the HTTP fixture. A corrupted manifest and a failed S3 download both
+  stopped before enclave-service startup or initialization.
+- systemd-analyze verify passed for the actual unit in a temporary filesystem
+  with stub dependency units. Package, firewall, allocator and service-control
+  commands in the bootstrap smoke were simulated, not actual AL2023/Nitro work.
+- nix develop --no-update-lock-file -c python3 -m unittest discover -s tests
+  -p 'test_*.py': all 10 existing attestation-verifier tests passed.
 
-Deterministic metrics:
-  METRIC lifecycle_vbytes_per_user=214.50
-  METRIC settlement_vbytes=414
-  METRIC deposit_vbytes=444
-  METRIC refund_vbytes=138
-  METRIC model_candidate_mappings=24
-  METRIC model_mappings_two_known=2
-  METRIC wasm_bytes=2193
-The primary metric is (four separate deposits + settlement) / four. It excludes
-alternative refunds, subsequent payout spends, wallet change and setup costs.
-Global assignment counts enumerate only the equal-amount/P2TR-type model with
-zero/two known pairs; three known pairs leave one assignment. No measured
-real-world anonymity, entropy guarantee or oracle-host privacy follows.
+Limitations:
+- No live terraform apply/destroy, AL2023 cloud-init, hugepage allocation,
+  Nitro launch, KMS authorization, attestation, or hardware restart/recovery
+  was exercised. The protected-key destroy guard is configured, not an AWS
+  deletion experiment. Mocked apply is not cloud integration evidence.
+- Readiness is not cryptographic attestation. Use synthetic transactions only;
+  the example regtest hash does not establish unpredictable future-block
+  chronology. Verify independently before considering any custody use.
 
-Unexercised: Bitcoin Core/mempool/chain validation, actual CSV maturity,
-distributed enrollment, remote transport for this example, real Nitro/KMS,
-production wallet UX, privacy proofs and global novelty review. Public fixture
-keys and synthetic UTXOs must never be used for real funds. Existing historical
-verification records below do not extend these research claims.
+HISTORICAL VERIFICATION: MINIMAL TERRAFORM TEST PARENT
+
+This host-only configuration is superseded by the one-apply workflow above.
+The following evidence describes the earlier revision, not its current KMS
+ownership or bootstrap filename.
+
+Scope:
+- deploy/terraform prepares one m7g.xlarge parent in an existing public subnet.
+  No AWS infrastructure was created during this verification. KMS remains
+  separately managed through the existing PCR-bound policy workflow.
+- No signer code, image contents, KMS policy generator or launcher changed.
+
+Commands and scenarios exercised:
+- Terraform 1.16.1: fmt, init -backend=false -input=false, and validate passed
+  against the signed hashicorp/aws 6.66.0 provider. The provider lock is retained.
+- Four temporary mocked-provider plan scenarios passed: the restricted parent
+  plan, rejection of world-open SSH (/0), rejection of a shared IPv4 subnet
+  (/24), and rejection of IPv6 input. These are offline configuration checks,
+  not AWS API calls, account permissions, regional availability, or live routing.
+- bash -n and ShellCheck 0.11.0 passed for the final bootstrap.sh.
+- Ran the final bootstrap in isolated temporary filesystems: normal completion,
+  package-manager failure, and service-start failure. The failure cases stopped
+  immediately without reporting readiness. Package installation, systemd,
+  kernel-module and Nitro commands were simulated; shell execution and file
+  writes were real. This does NOT verify actual AL2023 package installation,
+  packet filtering, hugepage reservation or the Nitro device.
+- Built the current pinned .#enclaver with --no-update-lock-file. readelf showed
+  AArch64 with no ELF interpreter or dynamic section, and nix-store --query
+  --references returned no dependencies. Copied its executable out of the store
+  and ran --help and print-manifest under qemu-aarch64; both exited successfully
+  and the latter loaded the real enclaver.yaml. Parent-side Nix is unnecessary
+  for this pinned static runner. This is not an emulated Nitro launch.
+- Temporary provider-plan fixtures, sandbox files, keys and copied executables
+  were removed; no permanent mock-based test suite was added.
+
+Still unverified: real terraform apply/destroy, EC2 cloud-init completion,
+allocator capacity, Nitro boot, live KMS authorization, hardware attestation,
+and restart/recovery. Use synthetic test transactions, not funds.
 
 SOFTWARE VERIFICATION: DURABLE SAFE-WITHDRAWAL EXAMPLE
 

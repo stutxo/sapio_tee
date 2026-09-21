@@ -79,8 +79,11 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
 
     // Exactly one output sends the entire input, less a bounded nonnegative
     // fee, to the committed script. There is no change or partial withdrawal.
+    // The output must clear the 330-satoshi P2TR dust floor: a sweep always
+    // pays a standard, spendable output, so an under-proportioned deposit
+    // cannot be burned entirely to fees by the permissionless settler.
     let Some(fee) = input_value.checked_sub(output_value) else {
         return Some(false);
     };
-    Some(output_script == destination && fee <= max_fee)
+    Some(output_script == destination && output_value >= 330 && fee <= max_fee)
 }

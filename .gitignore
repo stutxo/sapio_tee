@@ -7,3 +7,9 @@
 .env
 .venv-verifier/
 __pycache__/
+/deploy/terraform/.terraform/
+/deploy/terraform/*.tfstate*
+/deploy/terraform/*.tfvars
+/deploy/terraform/*.tfvars.json
+/deploy/terraform/*.tfplan
+/deploy/terraform/.terraform.tfstate.lock.info

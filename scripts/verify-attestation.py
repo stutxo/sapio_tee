@@ -2,6 +2,7 @@
 """Verify a Sapio Nitro identity against caller-supplied trust anchors and pins."""
 import argparse
 import base64
+import collections.abc
 import hashlib
 import io
 import json
@@ -83,9 +84,59 @@ def validate_program_profile(profile):
                 "program limits must be positive bounded integers")
 
 
+BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+# BIP32 extended-public-key version bytes for each named Bitcoin network.
+# Test networks share the tpub version; mainnet is the xpub version.
+XPUB_VERSIONS = {
+    "bitcoin": bytes.fromhex("0488b21e"),
+    "testnet": bytes.fromhex("043587cf"),
+    "testnet4": bytes.fromhex("043587cf"),
+    "signet": bytes.fromhex("043587cf"),
+    "regtest": bytes.fromhex("043587cf"),
+}
+
+
+def validate_settings(settings):
+    require(isinstance(settings, dict) and set(settings) == {"key_id", "blockhash", "network"},
+            "settings must contain exactly key_id, blockhash and network")
+    require(all(isinstance(value, str) and value for value in settings.values()),
+            "all settings must be nonempty strings")
+    require(settings["network"] in XPUB_VERSIONS, "unknown Bitcoin network in settings")
+
+
+def base58check_decode(value):
+    require(isinstance(value, str) and value, "xpub must be a nonempty string")
+    number = 0
+    for char in value:
+        index = BASE58_ALPHABET.find(char)
+        require(index >= 0, "xpub contains a character outside base58")
+        number = number * 58 + index
+    body = number.to_bytes((number.bit_length() + 7) // 8, "big")
+    decoded = b"\x00" * (len(value) - len(value.lstrip("1"))) + body
+    require(len(decoded) == 82, "xpub must decode to a 78-byte payload plus checksum")
+    payload, checksum = decoded[:78], decoded[78:]
+    require(hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4] == checksum,
+            "xpub base58check checksum mismatch")
+    return payload
+
+
+def validate_xpub(xpub, network):
+    # The user_data binding already makes this key authentic to the measured
+    # enclave. Fail closed anyway on a key that cannot even parse, and never
+    # bless a test-network key under a mainnet settings claim or vice versa.
+    payload = base58check_decode(xpub)
+    require(payload[:4] == XPUB_VERSIONS[network],
+            "xpub version bytes do not match the claimed settings network")
+    try:
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), payload[45:78])
+    except (TypeError, ValueError):
+        raise ValueError("xpub does not carry a valid secp256k1 public key") from None
+
+
 def verify(response, settings, program_profile, nonce, pins, trusted_root, now_ms):
-    # This is an independent trust input, never a profile learned from the host.
+    # These are independent trust inputs, never values learned from the host.
     validate_program_profile(program_profile)
+    validate_settings(settings)
     require(set(response) == {"document", "identity_json"}, "unexpected response fields")
     encoded = base64.b64decode(response["document"], validate=True)
     require(len(encoded) <= 16384, "attestation document too large")
@@ -95,7 +146,9 @@ def verify(response, settings, program_profile, nonce, pins, trusted_root, now_m
         cose = cose.value
     require(isinstance(cose, (list, tuple)) and len(cose) == 4, "invalid COSE_Sign1")
     protected, unprotected, payload, signature = cose
-    require(isinstance(unprotected, dict), "invalid unprotected header")
+    # cbor2 decodes maps inside a CBORTag as frozendict, not dict; both are
+    # CBOR maps. A tag-18-wrapped genuine document must not fail closed here.
+    require(isinstance(unprotected, collections.abc.Mapping), "invalid unprotected header")
     require(cbor_value(protected) == {1: -35}, "expected protected ES384 algorithm")
     require(1 not in unprotected, "ambiguous COSE algorithm")
     require(isinstance(signature, bytes) and len(signature) == 96, "invalid ES384 signature")
@@ -124,6 +177,9 @@ def verify(response, settings, program_profile, nonce, pins, trusted_root, now_m
     public_key.verify(utils.encode_dss_signature(r, s), signed, ec.ECDSA(hashes.SHA384()))
 
     require(document["digest"] == "SHA384", "expected SHA384 measurements")
+    # The measurement binding is a property of this function, not of its CLI
+    # caller: an empty or partial pin set must never verify "any AWS enclave".
+    require(set(pins) == {0, 1, 2}, "PCR0, PCR1 and PCR2 pins are all required")
     for index, expected in pins.items():
         require(len(expected) == 48 and any(expected), "zero or invalid measurement pin")
         require(document["pcrs"].get(index) == expected, f"PCR{index} mismatch")
@@ -147,7 +203,7 @@ def verify(response, settings, program_profile, nonce, pins, trusted_root, now_m
     validate_program_profile(identity["signing"])
     require(identity["signing"] == program_profile, "program profile mismatch")
     require(identity["settings"] == settings, "setup settings mismatch")
-    require(isinstance(identity["xpub"], str) and identity["xpub"], "missing xpub")
+    validate_xpub(identity["xpub"], settings["network"])
     return identity
 
 
