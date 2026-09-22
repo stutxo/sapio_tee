@@ -498,14 +498,12 @@ fn add_nocarry(a: &mut [u128; 2], b: &[u128; 2]) {
 fn sub_noborrow(a: &mut [u128; 2], b: &[u128; 2]) {
     #[inline]
     fn sbb(a: u128, b: u128, borrow: &mut u128) -> u128 {
-        let (a1, a0) = split_u128(a);
-        let (b1, b0) = split_u128(b);
-        let (b, r0) = split_u128((1 << 64) + a0 - b0 - *borrow);
-        let (b, r1) = split_u128((1 << 64) + a1 - b1 - ((b == 0) as u128));
-
-        *borrow = (b == 0) as u128;
-
-        combine_u128(r1, r0)
+        let (low, borrow0) = (a as u64).overflowing_sub(b as u64);
+        let (low, borrow1) = low.overflowing_sub(*borrow as u64);
+        let (high, borrow2) = ((a >> 64) as u64).overflowing_sub((b >> 64) as u64);
+        let (high, borrow3) = high.overflowing_sub((borrow0 | borrow1) as u64);
+        *borrow = (borrow2 | borrow3) as u128;
+        combine_u128(high as u128, low as u128)
     }
 
     let mut borrow = 0;
