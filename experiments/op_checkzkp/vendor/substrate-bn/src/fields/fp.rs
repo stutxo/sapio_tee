@@ -2,6 +2,7 @@ use crate::arith::{U256, U512};
 use crate::fields::FieldElement;
 use alloc::vec::Vec;
 use core::ops::{Add, Mul, Neg, Sub};
+use crunchy::unroll;
 use rand::Rng;
 
 macro_rules! field_impl {
@@ -265,6 +266,34 @@ impl Fq {
         self.0.halve(&Self::modulus());
         self
     }
+
+    pub(crate) fn third(self) -> Self {
+        // q=3h+1. For raw x=3a+r, x/3 mod q is a for r=0,
+        // a+2h+1 for r=1, or a+h+1 for r=2. Every result stays below q.
+        let mut quotient = U256::zero();
+        let mut remainder = 0u64;
+        unroll! {
+            for i in 0..8 {
+                let index = 7 - i;
+                let digit = (self.0.0[index / 4] >> (32 * (index % 4))) as u32 as u64;
+                let numerator = (remainder << 32) | digit;
+                quotient.0[index / 4] |= ((numerator / 3) as u128) << (32 * (index % 4));
+                remainder = numerator % 3;
+            }
+        }
+        let correction = match remainder {
+            1 => const_fq([
+                0xd2c05d6490535385, 0xba56470b9af68708,
+                0xd03583cf0100e593, 0x2042def740cbc01b,
+            ]),
+            2 => const_fq([
+                0x69602eb24829a9c3, 0xdd2b2385cd7b4384,
+                0xe81ac1e7808072c9, 0x10216f7ba065e00d,
+            ]),
+            _ => return Self(quotient),
+        };
+        Self(quotient) + correction
+    }
 }
 
 #[test]
@@ -275,6 +304,7 @@ fn fused_sum_product_handles_maximal_montgomery_residues() {
     for a in values {
         assert_eq!(a.halved() + a.halved(), a);
         assert_eq!(a.doubled(), a + a);
+        assert_eq!(a.third().doubled() + a.third(), a);
         for b in values {
             assert_eq!(Fq::difference_of_squares(a, b), a * a - b * b);
             for c in values {

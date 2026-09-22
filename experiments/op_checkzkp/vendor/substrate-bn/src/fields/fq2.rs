@@ -46,6 +46,10 @@ impl Fq2 {
         Self::new(self.c0.halved(), self.c1.halved())
     }
 
+    pub(crate) fn third(&self) -> Self {
+        Self::new(self.c0.third(), self.c1.third())
+    }
+
     pub fn mul_by_nonresidue(&self) -> Self {
         // (c0 + c1*i) * (9+i), with i^2=-1. The same add-chain is used
         // by ark-bn254's Fq6Config; no Montgomery multiplication is needed.

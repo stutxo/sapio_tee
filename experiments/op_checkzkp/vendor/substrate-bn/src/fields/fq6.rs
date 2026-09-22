@@ -199,15 +199,52 @@ impl Mul for Fq6 {
     type Output = Fq6;
 
     fn mul(self, other: Fq6) -> Fq6 {
-        let a_a = self.c0 * other.c0;
-        let b_b = self.c1 * other.c1;
-        let c_c = self.c2 * other.c2;
-
+        // Toom-Cook at 0, 1, -1, -2, infinity: five Fq2 products.
+        let a02 = self.c0 + self.c2;
+        let b02 = other.c0 + other.c2;
+        let a_minus = a02 - self.c1;
+        let b_minus = b02 - other.c1;
+        let v0 = self.c0 * other.c0;
+        let v4 = self.c2 * other.c2;
+        let v1 = (a02 + self.c1) * (b02 + other.c1);
+        let v_minus = a_minus * b_minus;
+        let v_minus_two = ((a_minus + self.c2).doubled() - self.c0)
+            * ((b_minus + other.c2).doubled() - other.c0);
+        let odd = (v1 - v_minus).halved();
+        let middle = v_minus - v0;
+        let c3 = (middle - (v_minus_two - v1).third()).halved() + v4.doubled();
+        let c2 = middle + odd - v4;
+        let c1 = odd - c3;
         Fq6 {
-            c0: ((self.c1 + self.c2) * (other.c1 + other.c2) - b_b - c_c).mul_by_nonresidue() + a_a,
-            c1: (self.c0 + self.c1) * (other.c0 + other.c1) - a_a - b_b + c_c.mul_by_nonresidue(),
-            c2: (self.c0 + self.c2) * (other.c0 + other.c2) - a_a + b_b - c_c,
+            c0: v0 + c3.mul_by_nonresidue(),
+            c1: c1 + v4.mul_by_nonresidue(),
+            c2,
         }
+    }
+}
+
+#[cfg(test)]
+fn schoolbook_product(a: Fq6, b: Fq6) -> Fq6 {
+    Fq6::new(
+        a.c0 * b.c0 + (a.c1 * b.c2 + a.c2 * b.c1).mul_by_nonresidue(),
+        a.c0 * b.c1 + a.c1 * b.c0 + (a.c2 * b.c2).mul_by_nonresidue(),
+        a.c0 * b.c2 + a.c1 * b.c1 + a.c2 * b.c0,
+    )
+}
+
+#[test]
+fn cubic_product_matches_schoolbook_convolution() {
+    use rand::{rngs::StdRng, SeedableRng};
+    let mut rng = StdRng::from_seed([83; 32]);
+    for index in 0..64 {
+        let a = match index {
+            0 => Fq6::zero(),
+            1 => Fq6::one(),
+            2 => Fq6::new(Fq2::zero(), Fq2::zero(), Fq2::one()),
+            _ => Fq6::random(&mut rng),
+        };
+        let b = if index == 3 { Fq6::zero() } else { Fq6::random(&mut rng) };
+        assert_eq!(a * b, schoolbook_product(a, b));
     }
 }
 
