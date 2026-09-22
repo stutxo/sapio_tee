@@ -1,0 +1,12 @@
+[package]
+name = "checkzkp-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+substrate-bn = { version = "=0.6.0", default-features = false }
+dlmalloc = { version = "=0.2.12", default-features = false }

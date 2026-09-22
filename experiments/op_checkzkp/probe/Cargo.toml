@@ -1,0 +1,15 @@
+[package]
+name = "checkzkp-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "=1.0.104"
+bitcoin = { version = "=0.32.102", features = ["rand"] }
+checkzkp-prover = { path = "../prover" }
+emulator_connect = { package = "ctv_emulators", git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-base = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-wasm = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1", features = ["host"] }
+wasmer = "=6.1.0"
+wasmer-middlewares = "=6.1.0"
