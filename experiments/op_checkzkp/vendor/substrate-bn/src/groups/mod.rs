@@ -460,13 +460,16 @@ impl GroupParams for G2Params {
     }
 
     fn is_in_subgroup(point: &AffineG<Self>) -> bool {
-        // https://eprint.iacr.org/2022/352.pdf, section 4.3; also ark-bn254 0.5.
-        // On-curve BN254 twist points are in G2 iff psi(P) = [6u^2]P.
-        // 6u^2 = p-r = 147946756881789318990833708069417712966.
-        let scalar = Fr::new(U256::from([
-            17887900258952609094, 8020209761171036667, 0, 0,
-        ])).unwrap();
-        point.to_jacobian() * scalar == point.mul_by_q().to_jacobian()
+        // Dai-Lin-Zhao-Zhou: https://eprint.iacr.org/2022/348.pdf, sections 3, 5.1.
+        // Also used by gnark-crypto's BN254 G2Jac.IsInSubGroup.
+        // [u+1]P + psi([u]P) + psi^2([u]P) = psi^3([2u]P).
+        // The caller must first check the curve equation.
+        let scalar = Fr::new(U256::from(4965661367192848881u64)).unwrap();
+        let p = point.to_jacobian();
+        let up = p * scalar;
+        let first = up.psi();
+        let second = first.psi();
+        up + p + first + second == second.psi().double()
     }
 }
 
@@ -503,6 +506,7 @@ mod subgroup_tests {
             if let Some(affine) = valid.to_affine() {
                 assert!(AffineG2::new(affine.x, affine.y).is_ok());
                 assert!(AffineG2::new(affine.x, -affine.y).is_ok());
+                assert_eq!(valid.psi().to_affine(), Some(affine.mul_by_q()));
             }
         }
     }
@@ -761,6 +765,16 @@ impl AffineG<G2Params> {
 }
 
 impl G2 {
+    fn psi(&self) -> Self {
+        // Untwist-Frobenius-twist in Jacobian coordinates. Conjugate Z too:
+        // affine x=X/Z^2 and y=Y/Z^3 must transform by the same field map.
+        G2 {
+            x: twist_mul_by_q_x() * self.x.frobenius_map(1),
+            y: twist_mul_by_q_y() * self.y.frobenius_map(1),
+            z: self.z.frobenius_map(1),
+        }
+    }
+
     fn mixed_addition_step_for_flipped_miller_loop(
         &mut self,
         base: &AffineG<G2Params>,

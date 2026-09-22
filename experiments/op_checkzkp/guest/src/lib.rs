@@ -117,7 +117,7 @@ fn read_g2(reader: &mut Reader<'_>) -> Option<G2> {
     // Fq2::from_slice uses radix-q encoding, NOT c0||c1. Decode each Fq separately.
     let x = Fq2::new(read_fq(reader)?, read_fq(reader)?);
     let y = Fq2::new(read_fq(reader)?, read_fq(reader)?);
-    // AffineG2::new checks the twist equation and psi(P)=[6u^2]P subgroup identity.
+    // AffineG2::new checks the twist equation and the published psi-based subgroup test.
     Some(AffineG2::new(x, y).ok()?.into())
 }
 
