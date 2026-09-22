@@ -37,8 +37,9 @@ pub trait GroupParams: Sized + fmt::Debug {
     fn name() -> &'static str;
     fn one() -> G<Self>;
     fn coeff_b() -> Self::Base;
-    fn check_order() -> bool {
-        false
+    fn is_in_subgroup(_point: &AffineG<Self>) -> bool {
+        // G1 has cofactor one; G2 overrides this after the curve check.
+        true
     }
 }
 
@@ -94,19 +95,11 @@ pub enum Error {
 impl<P: GroupParams> AffineG<P> {
     pub fn new(x: P::Base, y: P::Base) -> Result<Self, Error> {
         if y.squared() == (x.squared() * x) + P::coeff_b() {
-            if P::check_order() {
-                let p: G<P> = G {
-                    x: x,
-                    y: y,
-                    z: P::Base::one(),
-                };
-
-                if (p * (-Fr::one())) + p != G::zero() {
-                    return Err(Error::NotInSubgroup);
-                }
+            let point = AffineG { x, y };
+            if !P::is_in_subgroup(&point) {
+                return Err(Error::NotInSubgroup);
             }
-
-            Ok(AffineG { x: x, y: y })
+            Ok(point)
         } else {
             Err(Error::NotOnCurve)
         }
@@ -466,8 +459,52 @@ impl GroupParams for G2Params {
         )
     }
 
-    fn check_order() -> bool {
-        true
+    fn is_in_subgroup(point: &AffineG<Self>) -> bool {
+        // https://eprint.iacr.org/2022/352.pdf, section 4.3; also ark-bn254 0.5.
+        // On-curve BN254 twist points are in G2 iff psi(P) = [6u^2]P.
+        // 6u^2 = p-r = 147946756881789318990833708069417712966.
+        let scalar = Fr::new(U256::from([
+            17887900258952609094, 8020209761171036667, 0, 0,
+        ])).unwrap();
+        point.to_jacobian() * scalar == point.mul_by_q().to_jacobian()
+    }
+}
+
+#[cfg(test)]
+mod subgroup_tests {
+    use super::*;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    fn full_order_check(point: G2) -> bool {
+        (point * (-Fr::one())) + point == G2::zero()
+    }
+
+    #[test]
+    fn subgroup_check_matches_full_order_on_curve_and_torsion() {
+        // Deterministic public curve samples, not a trusted-setup seed.
+        let mut rng = StdRng::seed_from_u64(0x626e3235345f6732);
+        for _ in 0..64 {
+            let x = Fq2::random(&mut rng);
+            if let Some(y) = (x.squared() * x + G2Params::coeff_b()).sqrt() {
+                let raw = AffineG2 { x, y };
+                let point = raw.to_jacobian();
+                let expected = full_order_check(point);
+                assert_eq!(AffineG2::new(x, y).is_ok(), expected);
+                // Exercise the complementary cofactor component as well.
+                let torsion = point * (-Fr::one()) + point;
+                if let Some(affine) = torsion.to_affine() {
+                    assert_eq!(
+                        AffineG2::new(affine.x, affine.y).is_ok(),
+                        full_order_check(torsion),
+                    );
+                }
+            }
+            let valid = G2::one() * Fr::random(&mut rng);
+            if let Some(affine) = valid.to_affine() {
+                assert!(AffineG2::new(affine.x, affine.y).is_ok());
+                assert!(AffineG2::new(affine.x, -affine.y).is_ok());
+            }
+        }
     }
 }
 
