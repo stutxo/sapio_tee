@@ -859,17 +859,18 @@ impl AffineG<G2Params> {
             coeffs.push(r.doubling_step_for_flipped_miller_loop());
 
             if *i == 1 {
-                coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(self));
+                coeffs.push(r.mixed_addition_step_for_flipped_miller_loop::<true>(self));
             }
             if *i == 3 {
-                coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q_neg));
+                coeffs.push(r.mixed_addition_step_for_flipped_miller_loop::<true>(&q_neg));
             }
         }
         let q1 = self.mul_by_q();
         let q2 = -(q1.mul_by_q());
 
-        coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q1));
-        coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q2));
+        coeffs.push(r.mixed_addition_step_for_flipped_miller_loop::<true>(&q1));
+        // The last line is needed, but the final point state is never consumed.
+        coeffs.push(r.mixed_addition_step_for_flipped_miller_loop::<false>(&q2));
 
         G2Precomp { coeffs: coeffs }
     }
@@ -886,21 +887,23 @@ impl G2 {
         }
     }
 
-    fn mixed_addition_step_for_flipped_miller_loop(
+    fn mixed_addition_step_for_flipped_miller_loop<const UPDATE_POINT: bool>(
         &mut self,
         base: &AffineG<G2Params>,
     ) -> EllCoeffs {
         let d = self.x - self.z * base.x;
         let e = self.y - self.z * base.y;
-        let f = d.squared();
-        let g = e.squared();
-        let h = d * f;
-        let i = self.x * f;
-        let j = self.z * g + h - (i.doubled());
+        if UPDATE_POINT {
+            let f = d.squared();
+            let g = e.squared();
+            let h = d * f;
+            let i = self.x * f;
+            let j = self.z * g + h - i.doubled();
 
-        self.x = d * j;
-        self.y = e * (i - j) - h * self.y;
-        self.z = self.z * h;
+            self.x = d * j;
+            self.y = e * (i - j) - h * self.y;
+            self.z = self.z * h;
+        }
 
         EllCoeffs {
             ell_0: (e * base.x - d * base.y).mul_by_nonresidue(),
