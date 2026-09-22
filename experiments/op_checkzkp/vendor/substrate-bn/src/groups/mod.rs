@@ -661,6 +661,41 @@ pub fn miller_loop_batch(g2_precomputes: &[G2Precomp], g1_vec: &[AffineG1]) -> F
     miller_loop_batch_lines(&pairs)
 }
 
+fn multiply_miller_lines(
+    mut f: Fq12,
+    mut pairs: &[(&G2Precomp, AffineG1)],
+    idx: usize,
+    first: bool,
+) -> Fq12 {
+    if first {
+        let (precomputed, g1) = &pairs[0];
+        let c = &precomputed.coeffs[idx];
+        f = Fq12::new(
+            Fq6::new(c.ell_0, Fq2::zero(), c.ell_vv.scale(g1.x)),
+            Fq6::new(Fq2::zero(), c.ell_vw.scale(g1.y), Fq2::zero()),
+        );
+        pairs = &pairs[1..];
+    }
+    let (paired, last) = pairs.as_chunks::<2>();
+    for [(precomputed_a, g1_a), (precomputed_b, g1_b)] in paired {
+        let a = &precomputed_a.coeffs[idx];
+        let b = &precomputed_b.coeffs[idx];
+        f = f.mul_by_024_pair(
+            a.ell_0,
+            a.ell_vw.scale(g1_a.y),
+            a.ell_vv.scale(g1_a.x),
+            b.ell_0,
+            b.ell_vw.scale(g1_b.y),
+            b.ell_vv.scale(g1_b.x),
+        );
+    }
+    for (precomputed, g1) in last {
+        let c = &precomputed.coeffs[idx];
+        f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
+    }
+    f
+}
+
 /// Shared Miller squares over borrowed, complete prepared-line tables.
 pub fn miller_loop_batch_lines(pairs: &[(&G2Precomp, AffineG1)]) -> Fq12 {
     if pairs.is_empty() {
@@ -676,38 +711,17 @@ pub fn miller_loop_batch_lines(pairs: &[(&G2Precomp, AffineG1)]) -> Fq12 {
         if idx != 0 {
             f = f.squared();
         }
-        for (pair_index, (g2_precompute, g1)) in pairs.iter().enumerate() {
-            let c = &g2_precompute.coeffs[idx];
-            let vw = c.ell_vw.scale(g1.y);
-            let vv = c.ell_vv.scale(g1.x);
-            f = if idx == 0 && pair_index == 0 {
-                Fq12::new(
-                    Fq6::new(c.ell_0, Fq2::zero(), vv),
-                    Fq6::new(Fq2::zero(), vw, Fq2::zero()),
-                )
-            } else {
-                f.mul_by_024(c.ell_0, vw, vv)
-            };
-        }
+        f = multiply_miller_lines(f, pairs, idx, idx == 0);
         idx += 1;
         if *i != 0 {
-            for (g2_precompute, g1) in pairs {
-                let c = &g2_precompute.coeffs[idx];
-                f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-            }
+            f = multiply_miller_lines(f, pairs, idx, false);
             idx += 1;
         }
     }
 
-    for (g2_precompute, g1) in pairs {
-        let c = &g2_precompute.coeffs[idx];
-        f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-    }
+    f = multiply_miller_lines(f, pairs, idx, false);
     idx += 1;
-    for (g2_precompute, g1) in pairs {
-        let c = &g2_precompute.coeffs[idx];
-        f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-    }
+    f = multiply_miller_lines(f, pairs, idx, false);
     f
 }
 

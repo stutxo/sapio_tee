@@ -258,6 +258,43 @@ impl Fq12 {
         }
     }
 
+    /// Accumulate two sparse lines with 23 Fq2 products instead of 26.
+    pub fn mul_by_024_pair(
+        &self,
+        a0: Fq2,
+        avw: Fq2,
+        avv: Fq2,
+        b0: Fq2,
+        bvw: Fq2,
+        bvv: Fq2,
+    ) -> Self {
+        // The product has no c1.c2 coefficient in this tower ordering.
+        let d0 = a0 * b0;
+        let d2 = avv * bvv;
+        let d4 = avw * bvw;
+        let c0 = Fq6::new(
+            d0 + d4.mul_by_nonresidue(),
+            d2.mul_by_nonresidue(),
+            (a0 + avv) * (b0 + bvv) - d0 - d2,
+        );
+        let c10 = ((avv + avw) * (bvv + bvw) - d2 - d4).mul_by_nonresidue();
+        let c11 = (a0 + avw) * (b0 + bvw) - d0 - d4;
+
+        // Multiply self.c1 by (c10, c11, 0) using five products.
+        let t0 = self.c1.c0 * c10;
+        let t1 = self.c1.c1 * c11;
+        let bb = Fq6::new(
+            t0 + (self.c1.c2 * c11).mul_by_nonresidue(),
+            (self.c1.c0 + self.c1.c1) * (c10 + c11) - t0 - t1,
+            self.c1.c2 * c10 + t1,
+        );
+        let aa = self.c0 * c0;
+        Self::new(
+            aa + bb.mul_by_nonresidue(),
+            (self.c0 + self.c1) * Fq6::new(c0.c0 + c10, c0.c1 + c11, c0.c2) - aa - bb,
+        )
+    }
+
     pub fn cyclotomic_squared(&self) -> Self {
         let z0 = self.c0.c0;
         let z4 = self.c0.c1;
@@ -429,4 +466,32 @@ fn canonical_encoding_uses_explicit_tower_order() {
     value.to_big_endian(&mut encoded).unwrap();
     assert_eq!(encoded, expected);
     assert_eq!(Fq12::from_big_endian(&expected), Some(value));
+}
+
+#[test]
+fn paired_sparse_lines_match_dense_products() {
+    use rand::{rngs::StdRng, SeedableRng};
+    let mut rng = StdRng::from_seed([37; 32]);
+    let line = |a: [Fq2; 3]| {
+        Fq12::new(
+            Fq6::new(a[0], Fq2::zero(), a[2]),
+            Fq6::new(Fq2::zero(), a[1], Fq2::zero()),
+        )
+    };
+    for index in 0..64 {
+        let f = if index == 0 { Fq12::zero() } else { Fq12::random(&mut rng) };
+        let mut a = [Fq2::random(&mut rng), Fq2::random(&mut rng), Fq2::random(&mut rng)];
+        let mut b = [Fq2::random(&mut rng), Fq2::random(&mut rng), Fq2::random(&mut rng)];
+        if index < 3 {
+            a = [Fq2::zero(); 3];
+            a[index] = Fq2::one();
+        }
+        if index == 3 {
+            b = [Fq2::zero(); 3];
+        }
+        assert_eq!(
+            f.mul_by_024_pair(a[0], a[1], a[2], b[0], b[1], b[2]),
+            f * line(a) * line(b),
+        );
+    }
 }
