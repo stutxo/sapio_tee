@@ -118,7 +118,16 @@ From the repository root:
 
 Edit ssh_cidr, ssh_public_key_path and kms_admin_role_arn; leave subnet_id
 empty to create the network, or set it to an existing public subnet; change
-region if needed. The example uses regtest and its public genesis block hash.
+region if needed. The default keeps enclave ports 8000 and 8367 tunnel-only;
+setting public_api_cidr (e.g. "0.0.0.0/0") opens both to that CIDR through
+the security group and host firewall, for a public TEST oracle. That exposure
+has no request authentication, no TLS, and no attestation binding of the
+session: anyone can read the public identity, request attestation documents,
+and submit program requests, all in plaintext. After any restart there is a
+hostile-first-setup race window until the service re-initializes from its
+recorded settings; a lost race means denial of service, not key compromise,
+and clients still reject a mismatched identity. Open it only on valueless
+test networks. The example uses regtest and its public genesis block hash.
 It is a SYNTHETIC TEST configuration: a hash chosen before apply does not
 establish the required future-unpredictable-block chronology, and the
 configuration refuses network = "bitcoin" outright. Do not fund it.

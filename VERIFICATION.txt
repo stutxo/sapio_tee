@@ -1,3 +1,27 @@
+LIVE VERIFICATION: PUBLIC TEST-ORACLE EXPOSURE (SIGNET)
+
+Scope:
+- public_api_cidr = "0.0.0.0/0" on the live signet deployment: conditional
+  security-group ingress on 8000/8367 and a skipped host firewall REJECT.
+
+Commands and scenarios exercised:
+- terraform 1.16.1 fmt and validate on the changed configuration. The first
+  plan surfaced an invalid for_each (numeric set); fixed with string ports
+  and tonumber, re-planned cleanly.
+- terraform apply completed: two ingress rules added, the parent replaced by
+  the bootstrap template change, and the per-instance SSM readiness check
+  passed again. From the public internet (no tunnel): GET
+  http://13.221.236.12:8000/health answered 200 "ready" and /public-key 200
+  with mode "nitro"; a TCP connect to port 8367 succeeded.
+- The public identity after full INSTANCE REPLACEMENT is byte-identical to
+  the pre-replacement identity: recovery now holds across service restart
+  and instance replacement, both through the same live KMS derivation.
+
+Limitations:
+- Reachability was tested from one external network position (this
+  workstation), not multiple vantage points. Public exposure remains
+  unauthenticated and unencrypted; see USAGE.txt for the restart race.
+
 LIVE VERIFICATION: FIRST NITRO DEPLOYMENT (SIGNET)
 
 Scope:

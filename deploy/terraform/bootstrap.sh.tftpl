@@ -7,6 +7,10 @@ dnf install -y aws-nitro-enclaves-cli python3 iptables-services amazon-ssm-agent
 usermod -aG ne ec2-user
 systemctl enable --now amazon-ssm-agent
 
+%{ if open_api ~}
+# Public test-oracle mode: ports 8000/8367 are deliberately reachable per the
+# security group. The API and signer have no request authentication or TLS.
+%{ else ~}
 # Defense in depth: the runner binds all interfaces; SSH forwards use loopback.
 for firewall in iptables ip6tables; do
     cat > "/etc/sysconfig/$firewall" <<'RULES'
@@ -19,6 +23,7 @@ COMMIT
 RULES
     systemctl enable --now "$firewall"
 done
+%{ endif ~}
 
 cat > /etc/nitro_enclaves/allocator.yaml <<'ALLOCATOR'
 ---

@@ -6,6 +6,12 @@ subnet_id           = ""
 ssh_cidr            = "203.0.113.10/32"
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 
+# Expose the unauthenticated enclave API and signer to this IPv4 CIDR.
+# "0.0.0.0/0" makes a PUBLIC test oracle: no request authentication, no TLS,
+# plaintext traffic, and a hostile-first-setup race window after each restart.
+# Use only on valueless test networks. Empty keeps ports tunnel-only.
+public_api_cidr     = ""
+
 # Terraform must run as this IAM role (not the EC2 role or an STS session ARN).
 kms_admin_role_arn = "arn:aws:iam::123456789012:role/REPLACE"
 

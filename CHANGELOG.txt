@@ -1,5 +1,11 @@
 Unreleased
 
+- Add optional public test-oracle exposure: public_api_cidr opens security
+  group ingress on enclave ports 8000 and 8367 and skips the host firewall
+  REJECT for them. Empty (the default) keeps the previous tunnel-only
+  posture. Documented as unauthenticated, unencrypted, test-network-only,
+  with a hostile-first-setup race window after restarts.
+
 - Fix the first-live-boot defect: the cross-built enclave init was dynamically
   linked against a Nix-store glibc. Current nixpkgs buildGoModule manages
   env.CGO_ENABLED itself and drops the pinned package's legacy integer

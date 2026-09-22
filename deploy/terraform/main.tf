@@ -46,6 +46,17 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_ed25519.pub"
 }
 
+variable "public_api_cidr" {
+  description = "IPv4 CIDR allowed to reach enclave ports 8000 and 8367, e.g. 0.0.0.0/0 for a public test oracle. Empty keeps both ports tunnel-only."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.public_api_cidr == "" || can(cidrnetmask(var.public_api_cidr))
+    error_message = "Use an IPv4 CIDR such as 0.0.0.0/0, or leave empty to keep the API private."
+  }
+}
+
 variable "kms_admin_role_arn" {
   description = "Same-account IAM role running Terraform; separate from the EC2 role."
   type        = string
@@ -290,6 +301,19 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   to_port           = 22
 }
 
+# Public test-oracle exposure: the HTTP API and ProgramOracle signer have no
+# request authentication and no TLS; open this only on valueless test networks.
+resource "aws_vpc_security_group_ingress_rule" "api" {
+  for_each = var.public_api_cidr != "" ? toset(["8000", "8367"]) : toset([])
+
+  security_group_id = aws_security_group.parent.id
+  description       = "Unauthenticated enclave API and signer; test networks only"
+  cidr_ipv4         = var.public_api_cidr
+  ip_protocol       = "tcp"
+  from_port         = tonumber(each.value)
+  to_port           = tonumber(each.value)
+}
+
 resource "aws_vpc_security_group_egress_rule" "parent" {
   security_group_id = aws_security_group.parent.id
   description       = "Package installation and public AWS endpoints"
@@ -329,6 +353,7 @@ resource "aws_instance" "parent" {
     prefix       = local.deployment_hash
     artifacts    = local.artifact_hashes
     setup_sha256 = sha256(local.setup_json)
+    open_api     = var.public_api_cidr != ""
   })
   user_data_replace_on_change = true
 
