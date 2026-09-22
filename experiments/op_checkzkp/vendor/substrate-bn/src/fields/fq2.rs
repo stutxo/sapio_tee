@@ -1,26 +1,9 @@
 use core::ops::{Add, Mul, Neg, Sub};
 use rand::Rng;
-use crate::fields::{const_fq, FieldElement, Fq};
+use crate::fields::{FieldElement, Fq};
 use crate::arith::{U256, U512};
 
 
-#[inline]
-pub fn fq2_nonresidue() -> Fq2 {
-    Fq2::new(
-        const_fq([
-            0xf60647ce410d7ff7,
-            0x2f3d6f4dd31bd011,
-            0x2943337e3940c6d1,
-            0x1d9598e8a7e39857,
-        ]),
-        const_fq([
-            0xd35d438dc58f0d9d,
-            0x0a78eb28f5c70b3d,
-            0x666ea36f7879462c,
-            0x0e0a77c19a07df2f,
-        ]),
-    )
-}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -42,7 +25,15 @@ impl Fq2 {
     }
 
     pub fn mul_by_nonresidue(&self) -> Self {
-        *self * fq2_nonresidue()
+        // (c0 + c1*i) * (9+i), with i^2=-1. The same add-chain is used
+        // by ark-bn254's Fq6Config; no Montgomery multiplication is needed.
+        let twice = *self + *self;
+        let four = twice + twice;
+        let eight = four + four;
+        Fq2 {
+            c0: eight.c0 + self.c0 - self.c1,
+            c1: eight.c1 + self.c1 + self.c0,
+        }
     }
 
     pub fn frobenius_map(&self, power: usize) -> Self {

@@ -1,4 +1,4 @@
-use crate::fields::{const_fq, FieldElement, Fq, Fq12, Fq2, Fr, fq2_nonresidue};
+use crate::fields::{const_fq, FieldElement, Fq, Fq12, Fq2, Fr};
 use crate::arith::U256;
 use core::{fmt, ops::{Add, Mul, Neg, Sub}};
 use rand::Rng;
@@ -512,10 +512,6 @@ fn test_affine_jacobian_conversion() {
     }
 }
 
-#[inline]
-fn twist() -> Fq2 {
-    fq2_nonresidue()
-}
 
 #[inline]
 fn two_inv() -> Fq {
@@ -745,7 +741,7 @@ impl G2 {
         self.z = self.z * h;
 
         EllCoeffs {
-            ell_0: twist() * (e * base.x - d * base.y),
+            ell_0: (e * base.x - d * base.y).mul_by_nonresidue(),
             ell_vv: e.neg(),
             ell_vw: d,
         }
@@ -769,7 +765,7 @@ impl G2 {
         self.z = b * h;
 
         EllCoeffs {
-            ell_0: twist() * i,
+            ell_0: i.mul_by_nonresidue(),
             ell_vw: h.neg(),
             ell_vv: j + j + j,
         }

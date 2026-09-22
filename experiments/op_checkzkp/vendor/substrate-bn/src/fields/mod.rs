@@ -9,7 +9,7 @@ use core::ops::{Add, Mul, Neg, Sub};
 use alloc::fmt::Debug;
 
 pub use self::fp::{const_fq, Fq, Fr};
-pub use self::fq2::{Fq2, fq2_nonresidue};
+pub use self::fq2::Fq2;
 pub use self::fq6::Fq6;
 pub use self::fq12::Fq12;
 
