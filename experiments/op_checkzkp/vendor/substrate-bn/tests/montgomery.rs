@@ -67,10 +67,13 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
         // and the unreduced input supported by Fr::new_mul_factor. Check both
         // operand orders: it is sufficient for either input to be reduced.
         for a in &values {
+            let canonical_a = a % &p;
+            let mut square = encoded(&canonical_a);
+            square.square(&modulus, inv);
+            assert_eq!(integer(&square), (&canonical_a * &canonical_a * &r_inverse) % &p);
             for raw_b in &values {
                 assert_eq!(encoded(a).cmp(&encoded(raw_b)), a.cmp(raw_b));
                 let b = raw_b % &p;
-                let canonical_a = a % &p;
                 let mut sum = encoded(&canonical_a);
                 sum.add(&encoded(&b), &modulus);
                 assert_eq!(integer(&sum), (&canonical_a + &b) % &p);

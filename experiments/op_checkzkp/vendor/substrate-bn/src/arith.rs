@@ -324,6 +324,75 @@ impl U256 {
         }
     }
 
+    /// Square a canonical residue with odd modulus p < 2^255.
+    /// Product-scanning REDC uses only the 36 distinct 32-bit square products.
+    pub fn square(&mut self, modulo: &Self, inv: u128) {
+        debug_assert!(*self < *modulo && modulo.0[1] >> 127 == 0 && !modulo.is_even());
+        const MASK: u64 = u32::MAX as u64;
+        let mut a = [0u64; 8];
+        let mut p = [0u64; 8];
+        unroll! {
+            for i in 0..8 {
+                a[i] = ((self.0[i / 4] >> (32 * (i % 4))) as u64) & MASK;
+                p[i] = ((modulo.0[i / 4] >> (32 * (i % 4))) as u64) & MASK;
+            }
+        }
+        let mut m = [0u64; 8];
+        let mut result = [0u64; 8];
+        let mut carry = 0u64;
+        unroll! {
+            for column in 0..16 {
+                let mut low = carry & MASK;
+                let mut high = carry >> 32;
+                unroll! {
+                    for i in 0..8 {
+                        unroll! {
+                            for j in 0..8 {
+                                if i + j == column {
+                                    if i < j {
+                                        let product = a[i] * a[j];
+                                        low += (product << 1) & MASK;
+                                        high += product >> 31;
+                                    } else if i == j {
+                                        let product = a[i] * a[j];
+                                        low += product & MASK;
+                                        high += product >> 32;
+                                    }
+                                    if i < column {
+                                        let product = m[i] * p[j];
+                                        low += product & MASK;
+                                        high += product >> 32;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if column < 8 {
+                    m[column % 8] = low.wrapping_mul(inv as u32 as u64) & MASK;
+                    let product = m[column % 8] * p[0];
+                    low += product & MASK;
+                    high += product >> 32;
+                    debug_assert_eq!(low & MASK, 0);
+                } else {
+                    result[column % 8] = low & MASK;
+                }
+                // Each half sums at most sixteen 33-bit contributions, so
+                // neither accumulator can overflow u64.
+                carry = high + (low >> 32);
+            }
+        }
+        // a² + m*p < p² + R*p < R² for p < R/2.
+        debug_assert_eq!(carry, 0);
+        self.0[0] = result[0] as u128 | (result[1] as u128) << 32
+            | (result[2] as u128) << 64 | (result[3] as u128) << 96;
+        self.0[1] = result[4] as u128 | (result[5] as u128) << 32
+            | (result[6] as u128) << 64 | (result[7] as u128) << 96;
+        if *self >= *modulo {
+            sub_noborrow(&mut self.0, &modulo.0);
+        }
+    }
+
     /// Multiply two sums of canonical residues without reducing either sum.
     pub(crate) fn mul_sums(
         mut self,

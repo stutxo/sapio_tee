@@ -118,6 +118,13 @@ macro_rules! field_impl {
                 $name(value)
             }
 
+            #[inline]
+            fn squared(&self) -> Self {
+                let mut value = self.0;
+                value.square(&U256::from($modulus), $inv);
+                $name(value)
+            }
+
             fn inverse(mut self) -> Option<Self> {
                 if self.is_zero() {
                     None
