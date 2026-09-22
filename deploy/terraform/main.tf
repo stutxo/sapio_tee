@@ -374,6 +374,17 @@ resource "aws_instance" "parent" {
   }
 }
 
+# A stable public address for the test oracle: it survives instance
+# replacement, stop/start and bootstrap changes. Billed only while unattached.
+resource "aws_eip" "parent" {
+  domain = "vpc"
+}
+
+resource "aws_eip_association" "parent" {
+  instance_id   = aws_instance.parent.id
+  allocation_id = aws_eip.parent.id
+}
+
 resource "terraform_data" "ready" {
   triggers_replace = [
     aws_instance.parent.id,
@@ -413,8 +424,8 @@ output "measurements" {
 }
 
 output "public_ip" {
-  description = "Ephemeral address; refresh after a stop/start."
-  value       = aws_instance.parent.public_ip
+  description = "Stable Elastic IP address; it survives stop/start and instance replacement."
+  value       = aws_eip.parent.public_ip
 }
 
 output "instance_id" {
@@ -438,5 +449,5 @@ output "parent_role_arn" {
 
 output "ssh_tunnel" {
   description = "Use the private SSH key corresponding to ssh_public_key_path."
-  value       = "ssh -o ExitOnForwardFailure=yes -N -L 127.0.0.1:8000:127.0.0.1:8000 -L 127.0.0.1:8367:127.0.0.1:8367 ec2-user@${aws_instance.parent.public_ip}"
+  value       = "ssh -o ExitOnForwardFailure=yes -N -L 127.0.0.1:8000:127.0.0.1:8000 -L 127.0.0.1:8367:127.0.0.1:8367 ec2-user@${aws_eip.parent.public_ip}"
 }

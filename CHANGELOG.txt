@@ -1,5 +1,9 @@
 Unreleased
 
+- Attach an Elastic IP to the test parent: the public oracle keeps one stable
+  address across instance replacement and stop/start. The ssh_tunnel output
+  and public_ip now refer to it.
+
 - Add optional public test-oracle exposure: public_api_cidr opens security
   group ingress on enclave ports 8000 and 8367 and skips the host firewall
   REJECT for them. Empty (the default) keeps the previous tunnel-only
