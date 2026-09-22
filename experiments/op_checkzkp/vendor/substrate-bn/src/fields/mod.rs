@@ -32,6 +32,9 @@ pub trait FieldElement:
     fn squared(&self) -> Self {
         (*self) * (*self)
     }
+    fn doubled(&self) -> Self {
+        *self + *self
+    }
     fn inverse(self) -> Option<Self>;
     fn pow<I: Into<U256>>(&self, by: I) -> Self {
         let mut res = Self::one();

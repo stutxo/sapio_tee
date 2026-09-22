@@ -111,6 +111,13 @@ macro_rules! field_impl {
                 self.0.is_zero()
             }
 
+            #[inline]
+            fn doubled(&self) -> Self {
+                let mut value = self.0;
+                value.double(&U256::from($modulus));
+                $name(value)
+            }
+
             fn inverse(mut self) -> Option<Self> {
                 if self.is_zero() {
                     None
@@ -251,6 +258,7 @@ fn fused_sum_product_handles_maximal_montgomery_residues() {
     let values = [Fq::zero(), Fq::one(), Fq(maximal), -Fq(maximal)];
     for a in values {
         assert_eq!(a.halved() + a.halved(), a);
+        assert_eq!(a.doubled(), a + a);
         for b in values {
             assert_eq!(Fq::difference_of_squares(a, b), a * a - b * b);
             for c in values {

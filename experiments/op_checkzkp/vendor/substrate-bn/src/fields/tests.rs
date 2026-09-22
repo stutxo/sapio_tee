@@ -50,6 +50,7 @@ fn rand_element_addition_and_negation<F: FieldElement, R: Rng>(rng: &mut R) {
     for _ in 0..100 {
         let a = F::random(rng);
 
+        assert_eq!(a.doubled(), a + a);
         assert_eq!(a + (-a), F::zero());
     }
 

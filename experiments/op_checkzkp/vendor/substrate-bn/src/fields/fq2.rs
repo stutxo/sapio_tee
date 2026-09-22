@@ -48,9 +48,9 @@ impl Fq2 {
     pub fn mul_by_nonresidue(&self) -> Self {
         // (c0 + c1*i) * (9+i), with i^2=-1. The same add-chain is used
         // by ark-bn254's Fq6Config; no Montgomery multiplication is needed.
-        let twice = *self + *self;
-        let four = twice + twice;
-        let eight = four + four;
+        let twice = self.doubled();
+        let four = twice.doubled();
+        let eight = four.doubled();
         Fq2 {
             c0: eight.c0 + self.c0 - self.c1,
             c1: eight.c1 + self.c1 + self.c0,
@@ -103,6 +103,10 @@ impl FieldElement for Fq2 {
         self.c0.is_zero() && self.c1.is_zero()
     }
 
+    fn doubled(&self) -> Self {
+        Self::new(self.c0.doubled(), self.c1.doubled())
+    }
+
     fn squared(&self) -> Self {
         // Devegili OhEig Scott Dahab
         //     Multiplication and Squaring on Pairing-Friendly Fields.pdf
@@ -114,7 +118,7 @@ impl FieldElement for Fq2 {
 
         Fq2 {
             c0: Fq::difference_of_squares(self.c0, self.c1),
-            c1: ab + ab,
+            c1: ab.doubled(),
         }
     }
 

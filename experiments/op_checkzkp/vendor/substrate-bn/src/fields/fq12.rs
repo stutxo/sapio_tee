@@ -305,39 +305,39 @@ impl Fq12 {
 
         let tmp = z0 * z1;
         let t0 = z0.squared() + z1.squared().mul_by_nonresidue();
-        let t1 = tmp + tmp;
+        let t1 = tmp.doubled();
 
         let tmp = z2 * z3;
         let t2 = z2.squared() + z3.squared().mul_by_nonresidue();
-        let t3 = tmp + tmp;
+        let t3 = tmp.doubled();
 
         let tmp = z4 * z5;
         let t4 = z4.squared() + z5.squared().mul_by_nonresidue();
-        let t5 = tmp + tmp;
+        let t5 = tmp.doubled();
 
         let z0 = t0 - z0;
-        let z0 = z0 + z0;
+        let z0 = z0.doubled();
         let z0 = z0 + t0;
 
         let z1 = t1 + z1;
-        let z1 = z1 + z1;
+        let z1 = z1.doubled();
         let z1 = z1 + t1;
 
         let tmp = t5.mul_by_nonresidue();
         let z2 = tmp + z2;
-        let z2 = z2 + z2;
+        let z2 = z2.doubled();
         let z2 = z2 + tmp;
 
         let z3 = t4 - z3;
-        let z3 = z3 + z3;
+        let z3 = z3.doubled();
         let z3 = z3 + t4;
 
         let z4 = t2 - z4;
-        let z4 = z4 + z4;
+        let z4 = z4.doubled();
         let z4 = z4 + t2;
 
         let z5 = t3 + z5;
-        let z5 = z5 + z5;
+        let z5 = z5.doubled();
         let z5 = z5 + t3;
 
         Fq12 {
@@ -380,7 +380,7 @@ impl FieldElement for Fq12 {
             c0: (self.c1.mul_by_nonresidue() + self.c0) * (self.c0 + self.c1)
                 - ab
                 - ab.mul_by_nonresidue(),
-            c1: ab + ab,
+            c1: ab.doubled(),
         }
     }
 

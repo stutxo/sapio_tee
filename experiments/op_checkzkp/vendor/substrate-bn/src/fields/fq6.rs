@@ -160,13 +160,17 @@ impl FieldElement for Fq6 {
         self.c0.is_zero() && self.c1.is_zero() && self.c2.is_zero()
     }
 
+    fn doubled(&self) -> Self {
+        Self::new(self.c0.doubled(), self.c1.doubled(), self.c2.doubled())
+    }
+
     fn squared(&self) -> Self {
         let s0 = self.c0.squared();
         let ab = self.c0 * self.c1;
-        let s1 = ab + ab;
+        let s1 = ab.doubled();
         let s2 = (self.c0 - self.c1 + self.c2).squared();
         let bc = self.c1 * self.c2;
-        let s3 = bc + bc;
+        let s3 = bc.doubled();
         let s4 = self.c2.squared();
 
         Fq6 {

@@ -291,6 +291,14 @@ impl U256 {
         }
     }
 
+    pub(crate) fn double(&mut self, modulo: &Self) {
+        debug_assert!(*self < *modulo && modulo.0[1] >> 127 == 0);
+        mul2(&mut self.0);
+        if *self >= *modulo {
+            sub_noborrow(&mut self.0, &modulo.0);
+        }
+    }
+
     /// Subtract `other` from `self` (mod `modulo`)
     pub fn sub(&mut self, other: &U256, modulo: &U256) {
         if sub_with_borrow(&mut self.0, &other.0) != 0 {
