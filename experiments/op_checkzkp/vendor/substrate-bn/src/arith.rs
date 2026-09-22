@@ -298,7 +298,11 @@ impl U256 {
     /// Multiply `self` by `other` (mod `modulo`) via the Montgomery
     /// multiplication method.
     pub fn mul(&mut self, other: &U256, modulo: &U256, inv: u128) {
-        mul_reduce(&mut self.0, &other.0, &modulo.0, inv);
+        if (other.0[1] | modulo.0[1]) >> 127 == 0 {
+            mul_reduce::<true>(&mut self.0, &other.0, &modulo.0, inv);
+        } else {
+            mul_reduce::<false>(&mut self.0, &other.0, &modulo.0, inv);
+        }
 
         if *self >= *modulo {
             sub_noborrow(&mut self.0, &modulo.0);
@@ -542,13 +546,15 @@ fn mac_digit(from_index: usize, acc: &mut [u128; 4], b: &[u128; 2], c: u128) {
 }
 
 #[inline]
-fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u128) {
+fn mul_reduce<const SHORT: bool>(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u128) {
     // Coarsely integrated operand scanning (CIOS), radix 2^32.
     // Same Montgomery R=2^256 as upstream; inv truncated to 32 bits is -p^-1.
     // Each MAC is at most (2^32-1)^2 + 2*(2^32-1) = 2^64-1.
     // The ninth limb carries intermediate overflow. REDC needs the input
     // product below pR: either operand is reduced, or both are below 2p
     // with p < R/4. Both BN254 moduli satisfy this bound, and 2p < R.
+    // When b,p < R/2, each completed CIOS round has T < b+p < R.
+    // Its ninth limb is therefore zero; retain the generic path otherwise.
     const MASK: u64 = u32::MAX as u64;
     #[inline]
     fn limbs(value: &[u128; 2]) -> [u64; 8] {
@@ -576,9 +582,14 @@ fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u1
                     carry = sum >> 32;
                 }
             }
-            let top = t[8] + carry;
-            t[8] = top & MASK;
-            let high = top >> 32;
+            let high = if SHORT {
+                t[8] = carry;
+                0
+            } else {
+                let top = t[8] + carry;
+                t[8] = top & MASK;
+                top >> 32
+            };
             let k = t[0].wrapping_mul(inv) & MASK;
             carry = (t[0] + k * p[0]) >> 32;
             unroll! {
@@ -589,8 +600,14 @@ fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u1
                 }
             }
             let top = t[8] + carry;
-            t[7] = top & MASK;
-            t[8] = high + (top >> 32);
+            if SHORT {
+                debug_assert_eq!(top >> 32, 0);
+                t[7] = top;
+                t[8] = 0;
+            } else {
+                t[7] = top & MASK;
+                t[8] = high + (top >> 32);
+            }
         }
     }
     debug_assert_eq!(t[8], 0);
