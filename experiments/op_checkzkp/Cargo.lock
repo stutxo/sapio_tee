@@ -546,8 +546,11 @@ dependencies = [
  "bitcoin",
  "checkzkp-prover",
  "ctv_emulators",
+ "hex",
  "sapio-base",
  "sapio-wasm",
+ "serde_json",
+ "sha2",
  "wasmer",
  "wasmer-middlewares",
 ]
@@ -564,7 +567,9 @@ dependencies = [
  "ark-groth16",
  "ark-r1cs-std",
  "ark-relations",
+ "hex",
  "rand",
+ "serde",
  "sha2",
 ]
 
@@ -1151,6 +1156,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hex-conservative"

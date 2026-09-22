@@ -18,6 +18,8 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisE
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
+pub mod fixtures;
+
 const DOMAIN: &[u8] = b"sapio/checkzkp/bn254/v1";
 const VK_LEN: usize = 896;
 const PARAMETERS_LEN: usize = 928;

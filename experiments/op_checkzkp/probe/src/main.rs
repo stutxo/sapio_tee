@@ -1,5 +1,8 @@
 //! Local-only Groth16 feasibility experiment. Synthetic funding, no network.
-//! Diagnostic mode may bypass module admission and increase fuel; it never signs.
+//! Diagnostic mode may bypass the module byte cap and increase fuel; it never signs.
+mod benchmark;
+mod runtime;
+
 use anyhow::{bail, ensure, Context, Result};
 use bitcoin::bip32::Xpriv;
 use bitcoin::consensus::Encodable;
@@ -12,32 +15,67 @@ use emulator_connect::program::{
     validate_program_response, ProgramError, ProgramOracle, ProgramSigningRequest,
     ProgramSpendPath, WasmEvaluator, PSBT,
 };
+use runtime::{Admission, MeteredGuest};
 use sapio_base::program::{ProgramInstance, MAX_PROGRAM_BYTES};
-use sapio_wasm::host::{add_crypto_imports, bind_crypto, new_evaluator_store, INSTANCE_FUEL};
+use sapio_wasm::host::INSTANCE_FUEL;
 use std::path::PathBuf;
 use std::time::Instant;
-use wasmer::{Imports, Instance, Module, Store, TypedFunction};
-use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
-type Arguments = (i32, i32, i32, i32, i32, i32, i32, i32);
+enum Command {
+    Generate(PathBuf),
+    Benchmark {
+        module: PathBuf,
+        corpus: PathBuf,
+        profile: Option<PathBuf>,
+    },
+    Legacy {
+        module: PathBuf,
+        diagnostic_fuel: Option<u64>,
+    },
+}
 
-fn options() -> Result<(PathBuf, Option<u64>)> {
+fn options() -> Result<Command> {
     let mut args = std::env::args_os().skip(1);
-    let path = args
-        .next()
-        .context("usage: checkzkp-probe MODULE.wasm [--diagnostic-fuel UNITS]")?;
-    let fuel = match args.next() {
-        None => None,
-        Some(flag) if flag == "--diagnostic-fuel" => {
-            let value = args.next().context("missing diagnostic fuel")?;
-            let fuel = value.to_str().context("invalid fuel encoding")?.parse()?;
-            ensure!(fuel > 0, "fuel must be positive");
-            Some(fuel)
+    let first = args.next().context(
+        "usage: checkzkp-probe MODULE.wasm [--diagnostic-fuel UNITS] | --generate-corpus PATH | --benchmark MODULE CORPUS [--profile-module MODULE]",
+    )?;
+    let command = if first == "--generate-corpus" {
+        Command::Generate(args.next().context("missing corpus output path")?.into())
+    } else if first == "--benchmark" {
+        let module = args.next().context("missing benchmark module")?.into();
+        let corpus = args.next().context("missing public corpus")?.into();
+        let profile = match args.next() {
+            None => None,
+            Some(flag) if flag == "--profile-module" => Some(
+                args.next()
+                    .context("missing diagnostic profile module")?
+                    .into(),
+            ),
+            Some(_) => bail!("unknown benchmark argument"),
+        };
+        Command::Benchmark {
+            module,
+            corpus,
+            profile,
         }
-        Some(_) => bail!("unknown argument"),
+    } else {
+        let diagnostic_fuel = match args.next() {
+            None => None,
+            Some(flag) if flag == "--diagnostic-fuel" => {
+                let value = args.next().context("missing diagnostic fuel")?;
+                let fuel = value.to_str().context("invalid fuel encoding")?.parse()?;
+                ensure!(fuel > 0, "fuel must be positive");
+                Some(fuel)
+            }
+            Some(_) => bail!("unknown argument"),
+        };
+        Command::Legacy {
+            module: first.into(),
+            diagnostic_fuel,
+        }
     };
     ensure!(args.next().is_none(), "unexpected trailing arguments");
-    Ok((path.into(), fuel))
+    Ok(command)
 }
 
 fn transaction(key: XOnlyPublicKey) -> Result<Psbt> {
@@ -93,95 +131,6 @@ fn view(psbt: &Psbt) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-struct MeteredGuest {
-    store: Store,
-    module: Module,
-    fuel: u64,
-}
-
-impl MeteredGuest {
-    fn new(bytes: &[u8], fuel: u64) -> Result<Self> {
-        let store = new_evaluator_store();
-        let start = Instant::now();
-        let module = Module::new(&store, bytes)?;
-        for import in module.imports() {
-            ensure!(
-                import.module() == "sapio_crypto_v1" && import.name() == "sha256",
-                "unexpected guest import {}::{}",
-                import.module(),
-                import.name()
-            );
-        }
-        println!(
-            "WASM compilation: {:.3}s; ZKP arithmetic has no native imports",
-            start.elapsed().as_secs_f64()
-        );
-        Ok(Self {
-            store,
-            module,
-            fuel,
-        })
-    }
-
-    fn evaluate(
-        &mut self,
-        parameters: &[u8],
-        view: &[u8],
-        witness: &[u8],
-        label: &str,
-    ) -> Result<i32> {
-        let mut imports = Imports::new();
-        let crypto = add_crypto_imports(&mut self.store, &mut imports);
-        let instance = Instance::new(&mut self.store, &self.module, &imports)?;
-        bind_crypto(&crypto, &mut self.store, &instance)?;
-        if self.fuel != INSTANCE_FUEL {
-            set_remaining_points(&mut self.store, &instance, self.fuel);
-        }
-        let memory = instance.exports.get_memory("memory")?;
-        let alloc: TypedFunction<i32, i32> = instance
-            .exports
-            .get_typed_function(&self.store, "sapio_alloc_v1")?;
-        let evaluate: TypedFunction<Arguments, i32> = instance
-            .exports
-            .get_typed_function(&self.store, "sapio_evaluate_v1")?;
-        let started = Instant::now();
-        let mut pointers = [0i32; 3];
-        for (slot, bytes) in pointers.iter_mut().zip([parameters, view, witness]) {
-            *slot = alloc.call(&mut self.store, bytes.len() as i32)?;
-        }
-        for (pointer, bytes) in pointers.iter().zip([parameters, view, witness]) {
-            memory
-                .view(&self.store)
-                .write(u64::from(*pointer as u32), bytes)?;
-        }
-        let result = evaluate.call(
-            &mut self.store,
-            0,
-            0,
-            pointers[0],
-            parameters.len() as i32,
-            pointers[1],
-            view.len() as i32,
-            pointers[2],
-            witness.len() as i32,
-        );
-        let fuel = match get_remaining_points(&mut self.store, &instance) {
-            MeteringPoints::Remaining(left) => format!("{}", self.fuel - left),
-            MeteringPoints::Exhausted => format!(">={} (exhausted)", self.fuel),
-        };
-        let outcome = match &result {
-            Ok(value) => format!("return {value}"),
-            Err(error) => format!("trap: {error}"),
-        };
-        println!(
-            "{label}: {outcome}; fuel={fuel}; memory={} bytes; elapsed={:.3}s",
-            memory.view(&self.store).data_size(),
-            started.elapsed().as_secs_f64()
-        );
-        result.with_context(|| format!("{label} failed to complete"))
-    }
-}
-
 fn invalid_proof(witness: &[u8]) -> Vec<u8> {
     // Valid prime-order G1 point, wrong Groth16 A: exercises the pairing equation,
     // not just malformed-point decoding. BN254 G1 generator is (1, 2).
@@ -218,6 +167,7 @@ fn exercise(
     psbt: &Psbt,
     witness: &[u8],
     fuel: u64,
+    admission: Admission,
 ) -> Result<()> {
     let view = view(psbt)?;
     ensure!(
@@ -236,7 +186,11 @@ fn exercise(
     );
     println!("PASS independent arkworks reference: valid / invalid / changed transaction");
 
-    let mut guest = MeteredGuest::new(module, fuel)?;
+    let guest = MeteredGuest::new(module, fuel, admission)?;
+    println!(
+        "WASM compilation: {:.3}s; ZKP arithmetic has no native imports",
+        guest.compile_time.as_secs_f64()
+    );
     ensure!(
         guest.evaluate(parameters, &view, witness, "valid proof")? == 1,
         "valid proof rejected"
@@ -284,7 +238,21 @@ fn exercise(
 }
 
 fn main() -> Result<()> {
-    let (path, diagnostic_fuel) = options()?;
+    match options()? {
+        Command::Generate(path) => benchmark::generate(&path),
+        Command::Benchmark {
+            module,
+            corpus,
+            profile,
+        } => benchmark::run(&module, &corpus, profile.as_deref()),
+        Command::Legacy {
+            module,
+            diagnostic_fuel,
+        } => legacy(module, diagnostic_fuel),
+    }
+}
+
+fn legacy(path: PathBuf, diagnostic_fuel: Option<u64>) -> Result<()> {
     let module = std::fs::read(path)?;
     println!(
         "Module: {} bytes; production limit: {MAX_PROGRAM_BYTES}; production fuel: {INSTANCE_FUEL}",
@@ -296,7 +264,7 @@ fn main() -> Result<()> {
         bail!("runtime unexpectedly admitted an oversized module");
     }
     if let Some(fuel) = diagnostic_fuel {
-        println!("DIAGNOSTIC ONLY: module admission bypassed, fuel={fuel}; no signing; not evidence of deployability");
+        println!("DIAGNOSTIC ONLY: module byte cap bypassed, fuel={fuel}; no signing; not evidence of deployability");
     }
     let mut seed = [0u8; 32];
     bitcoin::secp256k1::rand::thread_rng().fill_bytes(&mut seed);
@@ -313,7 +281,15 @@ fn main() -> Result<()> {
         let psbt = transaction(oracle.public_root().public_key.x_only_public_key().0)?;
         let witness = prove(&prover, &psbt)?;
         println!("Parameters: {} bytes", parameters.len());
-        exercise(&prover, &module, &parameters, &psbt, &witness, fuel)?;
+        exercise(
+            &prover,
+            &module,
+            &parameters,
+            &psbt,
+            &witness,
+            fuel,
+            Admission::LegacyDiagnostic,
+        )?;
         println!("PASS diagnostic WASM verification only; no oracle signature requested");
         return Ok(());
     }
@@ -340,6 +316,7 @@ fn main() -> Result<()> {
         &request.psbt.0,
         &request.witness,
         INSTANCE_FUEL,
+        Admission::Scored,
     )?;
     let signed = signing.context("valid proof oracle signing")?;
     validate_program_response(&request, &signed, &oracle.public_root())?;
