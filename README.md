@@ -119,6 +119,49 @@ update an already funded contract. See [provenance and encoding](examples/vault/
 CI checks the exact WASM bytes and runs both signing examples. This inline
 program needs no registry change or enclave redeployment.
 
+### Experiment: pure-WASM Groth16 authorization
+
+[`experiments/op_checkzkp`](experiments/op_checkzkp) verifies a BN254 Groth16
+proof of knowledge of a 32-byte secret `s`, with `C = SHA256(s)` and
+`A = SHA256(s || T)`. The guest recomputes
+`T = SHA256("sapio/checkzkp/bn254/v1" || SHA256(encoded_signed_view))`.
+Only the existing SHA256 host import is used; proof validation and all per-spend
+ZKP arithmetic execute in WASM. The independent reference remains arkworks.
+
+From the repository root, with the pinned dependencies already cached:
+
+```sh
+bash autoresearch.sh
+nix develop --offline --no-update-lock-file --command env RAYON_NUM_THREADS=1 \
+  experiments/op_checkzkp/target/release/checkzkp-probe \
+  experiments/op_checkzkp/target/checkzkp_guest.scored.wasm
+```
+
+The first command builds offline and measures the frozen public corpus. Its
+diagnostic allowance is not a deployment gate. The second generates a fresh
+private setup and proof, invokes the actual unchanged `ProgramOracle`, validates
+the returned signature with `validate_program_response`, and checks rejection of
+an invalid proof and changed transaction under the original 100,000,000 fuel cap.
+Both commands are local-only; funding is synthetic and nothing is broadcast.
+
+**Preparation is a security boundary.** The sole producer in
+[`probe/src/prepared.rs`](experiments/op_checkzkp/probe/src/prepared.rs) validates
+every original key point before computing the constant pairing, fixed G2 lines,
+and fixed commitment contribution. Canonical prepared decoding does not
+authenticate arbitrary tables. Use this validated producer before deriving the
+funding address; the complete module and prepared parameters determine a new
+program identity, not an upgrade of existing funded outputs.
+
+The prepared format is `G16C || pairing[33792] || folded_IC[65] ||
+IC3..IC6[256] || C[32]`, totaling 34,149 bytes. Only the computed folded IC may
+encode infinity: tag zero with 64 zero bytes; finite points use tag one and
+canonical coordinates. Original source and proof points still forbid infinity.
+All 14 full-path corpus cases reach WASM; malformed source-key cases rejected
+during preparation are reported separately, never counted as guest rejections.
+The corpus maximum is not a universal worst-case bound. This remains an
+experimental single-party setup, not audited custody software or a Nitro
+performance measurement; never fund its disposable keys.
+
 ## Build the Nitro image
 
 ```sh

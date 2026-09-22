@@ -1,16 +1,20 @@
 # Experimental fork of crates.io substrate-bn 0.6.0; preserve both upstream licenses.
+# The combined fork selects Apache-2.0, including the attributed gnark seed chain.
 [package]
 edition = "2018"
 name = "substrate-bn"
 version = "0.6.0"
 authors = ["Sean Bowe <ewillbefull@gmail.com>", "Parity Technologies <admin@parity.io>"]
 description = "Pairing cryptography with the Barreto-Naehrig curve"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/paritytech/bn"
 publish = false
 
 [package.metadata.upstream]
 registry-checksum = "72b5bbfa79abbae15dd642ea8176a21a635ff3c00059961d1ea27ad04e5b441c"
+original-license = "MIT OR Apache-2.0"
+seed-chain-source = "https://github.com/Consensys/gnark-crypto/blob/master/ecc/bn254/internal/fptower/e12_pairing.go"
+seed-chain-license = "Apache-2.0"
 
 [dependencies]
 byteorder = { version = "1.0", features = ["i128"], default-features = false }

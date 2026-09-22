@@ -12,8 +12,8 @@ mod guest;
 
 use guest::{Arguments, Reader};
 use substrate_bn::{
-    arith::U256, AffineG1, AffineG2, Fq, Fq2, Fr, Group, PreparedPairing,
-    PREPARED_PAIRING_BYTES, G1, G2,
+    arith::U256, AffineG1, AffineG2, Fq, Fq2, Fr, Group, PreparedPairing, G1, G2,
+    PREPARED_PAIRING_BYTES,
 };
 
 const DOMAIN: &[u8] = b"sapio/checkzkp/bn254/v1";
@@ -83,10 +83,7 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     let mut terms = [(G1::zero(), 0u128); 4];
     let mut index = 0;
     // Four dynamic Fr values: the big-endian 128-bit halves of T and A.
-    for digest in [
-        transaction_digest.as_slice(),
-        &witness[PROOF_BYTES..],
-    ] {
+    for digest in [transaction_digest.as_slice(), &witness[PROOF_BYTES..]] {
         for half in digest.as_chunks::<16>().0.iter() {
             let mut scalar = [0u8; 32];
             scalar[16..].copy_from_slice(half);
@@ -108,7 +105,11 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
 
 fn read_folded_ic(reader: &mut Reader<'_>) -> Option<G1> {
     match reader.take(1)?[0] {
-        0 => reader.take(64)?.iter().all(|byte| *byte == 0).then_some(G1::zero()),
+        0 => reader
+            .take(64)?
+            .iter()
+            .all(|byte| *byte == 0)
+            .then_some(G1::zero()),
         1 => read_g1(reader),
         _ => None,
     }

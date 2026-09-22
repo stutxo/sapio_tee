@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
-use rand::Rng;
 use crunchy::unroll;
+use rand::Rng;
 
 use byteorder::{BigEndian, ByteOrder};
 
@@ -79,7 +79,7 @@ impl U512 {
         U512(res)
     }
 
-     pub fn from_slice(s: &[u8]) -> Result<U512, Error> {
+    pub fn from_slice(s: &[u8]) -> Result<U512, Error> {
         if s.len() != 64 {
             return Err(Error::InvalidLength {
                 expected: 32,
@@ -371,7 +371,7 @@ impl U256 {
 
     /// Return an Iterator<Item=bool> over all bits from
     /// MSB to LSB.
-    pub fn bits(&self) -> BitIterator {
+    pub fn bits(&self) -> BitIterator<'_> {
         BitIterator { int: &self, n: 256 }
     }
 }
@@ -574,10 +574,8 @@ fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u1
         }
     }
     debug_assert_eq!(t[8], 0);
-    this[0] = t[0] as u128 | (t[1] as u128) << 32
-        | (t[2] as u128) << 64 | (t[3] as u128) << 96;
-    this[1] = t[4] as u128 | (t[5] as u128) << 32
-        | (t[6] as u128) << 64 | (t[7] as u128) << 96;
+    this[0] = t[0] as u128 | (t[1] as u128) << 32 | (t[2] as u128) << 64 | (t[3] as u128) << 96;
+    this[1] = t[4] as u128 | (t[5] as u128) << 32 | (t[6] as u128) << 64 | (t[7] as u128) << 96;
 }
 
 #[test]

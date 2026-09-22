@@ -17,10 +17,24 @@ fn integer(value: &U256) -> BigUint {
 #[test]
 fn montgomery_carries_match_independent_integer_arithmetic() {
     let moduli = [
-        (U256::from([0x3c208c16d87cfd47, 0x97816a916871ca8d, 0xb85045b68181585d, 0x30644e72e131a029]),
-         0x09ede7d651eca6ac987d20782e4866389u128),
-        (U256::from([0x43e1f593f0000001, 0x2833e84879b97091, 0xb85045b68181585d, 0x30644e72e131a029]),
-         0x6586864b4c6911b3c2e1f593efffffffu128),
+        (
+            U256::from([
+                0x3c208c16d87cfd47,
+                0x97816a916871ca8d,
+                0xb85045b68181585d,
+                0x30644e72e131a029,
+            ]),
+            0x09ede7d651eca6ac987d20782e4866389u128,
+        ),
+        (
+            U256::from([
+                0x43e1f593f0000001,
+                0x2833e84879b97091,
+                0xb85045b68181585d,
+                0x30644e72e131a029,
+            ]),
+            0x6586864b4c6911b3c2e1f593efffffffu128,
+        ),
     ];
     let radix = BigUint::from(1u32) << 256usize;
     // Public deterministic test data, not cryptographic randomness.
@@ -28,7 +42,14 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
     for (modulus, inv) in moduli {
         let p = integer(&modulus);
         let r_inverse = radix.modpow(&(&p - 2u32), &p);
-        let mut values = vec![BigUint::from(0u32), BigUint::from(1u32), &p - 1u32, p.clone(), &p + 1u32, &radix - 1u32];
+        let mut values = vec![
+            BigUint::from(0u32),
+            BigUint::from(1u32),
+            &p - 1u32,
+            p.clone(),
+            &p + 1u32,
+            &radix - 1u32,
+        ];
         for bits in (32..=256).step_by(32) {
             values.push((BigUint::from(1u32) << bits) - 1u32);
         }

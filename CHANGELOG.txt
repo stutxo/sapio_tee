@@ -1,5 +1,17 @@
 Unreleased
 
+- Optimize the experimental pure-WASM BN254 Groth16 authorization verifier
+  without changing production limits or the SHA256-secret/transaction relation.
+  Retain radix-32 Montgomery products, extension-field specializations,
+  published subgroup/seed chains, joint public-input multiplication, and pinned
+  WASM optimization. Validate and commit prepared fixed-key data before funding;
+  this changes program identities and introduces an explicit trusted preparation
+  boundary, not a migration for existing funded outputs.
+  The 25-run research segment reduced the frozen full-path maximum from
+  488,320,714 to 86,507,624 fuel. Fresh synthetic requests passed actual unchanged
+  ProgramOracle signing and validate_program_response under the 100M cap.
+  No deployment, real funding, broadcasting, or Nitro timing measurement.
+
 - Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
   that recomputes the BIP-446 template hash (nVersion, nLockTime,
   sha_sequences, sha_outputs, annex flag, input index) and lets the oracle

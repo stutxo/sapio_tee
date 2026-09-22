@@ -1,6 +1,6 @@
 use substrate_bn::{
-    arith::U256, pairing_batch, AffineG2, Fq, Fq2, Fr, Group, GroupError, Gt,
-    PreparedPairing, G1, G2, PREPARED_PAIRING_BYTES,
+    arith::U256, pairing_batch, AffineG2, Fq, Fq2, Fr, Group, GroupError, Gt, PreparedPairing, G1,
+    G2, PREPARED_PAIRING_BYTES,
 };
 
 fn scalar(value: u64) -> Fr {
@@ -36,13 +36,12 @@ fn prepared_equation_matches_raw_pairing_with_and_without_ic() {
     let c = G1::one() * c_scalar;
     for ic_scalar in [scalar(13), Fr::zero()] {
         let ic = G1::one() * ic_scalar;
-        let a_scalar = (scalar(2) * scalar(3) + ic_scalar * scalar(5)
-            + c_scalar * scalar(7)) * b_scalar.inverse().unwrap();
+        let a_scalar = (scalar(2) * scalar(3) + ic_scalar * scalar(5) + c_scalar * scalar(7))
+            * b_scalar.inverse().unwrap();
         let valid_a = G1::one() * a_scalar;
         for (a, expected) in [(valid_a, true), (valid_a + G1::one(), false)] {
-            let raw = pairing_batch(&[
-                (a, b), (-alpha, beta), (-ic, gamma), (-c, delta),
-            ]) == Gt::one();
+            let raw =
+                pairing_batch(&[(a, b), (-alpha, beta), (-ic, gamma), (-c, delta)]) == Gt::one();
             assert_eq!(raw, expected);
             assert_eq!(prepared.verify(a, b, c, ic), Some(raw));
             assert_eq!(decoded.verify(a, b, c, ic), Some(raw));
@@ -69,7 +68,9 @@ fn codec_rejects_wrong_lengths_noncanonical_fields_and_zero_target() {
     // the final coordinate so a decoder cannot silently ignore a table suffix.
     for offset in [0, 384, PREPARED_PAIRING_BYTES - 32] {
         let mut invalid = bytes.clone();
-        Fq::modulus().to_big_endian(&mut invalid[offset..offset + 32]).unwrap();
+        Fq::modulus()
+            .to_big_endian(&mut invalid[offset..offset + 32])
+            .unwrap();
         assert!(PreparedPairing::decode_committed(&invalid).is_none());
     }
     let mut zero_target = bytes;
@@ -108,14 +109,16 @@ fn preparation_revalidates_every_source_point() {
 
     // Public deterministic curve samples, not a setup seed. Construct through
     // unchecked Jacobian coordinates to exercise prepare's own subgroup check.
-    let non_subgroup = (0..64u64).find_map(|value| {
-        let x = Fq2::new(Fq::from_u256(U256::from(value)).unwrap(), Fq::one());
-        let y = (x * x * x + G2::b()).sqrt()?;
-        match AffineG2::new(x, y) {
-            Err(GroupError::NotInSubgroup) => Some(G2::new(x, y, Fq2::one())),
-            _ => None,
-        }
-    }).expect("public curve sample outside G2 subgroup");
+    let non_subgroup = (0..64u64)
+        .find_map(|value| {
+            let x = Fq2::new(Fq::from_u256(U256::from(value)).unwrap(), Fq::one());
+            let y = (x * x * x + G2::b()).sqrt()?;
+            match AffineG2::new(x, y) {
+                Err(GroupError::NotInSubgroup) => Some(G2::new(x, y, Fq2::one())),
+                _ => None,
+            }
+        })
+        .expect("public curve sample outside G2 subgroup");
     let off_curve_g2 = G2::new(Fq2::zero(), Fq2::zero(), Fq2::one());
     for invalid in [G2::zero(), off_curve_g2, non_subgroup] {
         assert!(PreparedPairing::prepare(alpha, invalid, gamma, delta).is_none());

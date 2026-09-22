@@ -196,7 +196,12 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
         }
     }
     ensure!(
-        full_cases == corpus.cases.iter().filter(|case| case.kind == Kind::Full).count(),
+        full_cases
+            == corpus
+                .cases
+                .iter()
+                .filter(|case| case.kind == Kind::Full)
+                .count(),
         "not every full-path case reached the guest"
     );
     ensure!(
