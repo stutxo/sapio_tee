@@ -324,11 +324,11 @@ pub trait Group
 pub struct G1(groups::G1);
 
 impl G1 {
-    /// Six-term Straus MSM for public 128-bit scalars (variable time).
+    /// Four-term Straus MSM for public 128-bit scalars (variable time).
     /// The subset table is built here, not supplied or trusted by the caller.
-    pub fn msm_128(terms: &[(G1, u128); 6]) -> G1 {
-        let mut table = [groups::G1::zero(); 64];
-        for mask in 1usize..64 {
+    pub fn msm_128(terms: &[(G1, u128); 4]) -> G1 {
+        let mut table = [groups::G1::zero(); 16];
+        for mask in 1usize..16 {
             let bit = mask.trailing_zeros() as usize;
             table[mask] = table[mask ^ (1 << bit)] + terms[bit].0.0;
         }

@@ -98,10 +98,10 @@ def instrument_guest(source):
         ('    let mut proof = Reader::new(&witness[..PROOF_BYTES]);\n', 1, "proof decoding"),
         ('    let mut transcript = [0u8; DOMAIN.len() + 32];\n', 2, "transaction digest"),
         ('    let prepared = PreparedPairing::decode_committed(&parameters[4..4 + PREPARED_PAIRING_BYTES])?;\n', 3, "committed VK decoding"),
-        ('    // Six public Fr values: the big-endian 128-bit halves of C, T, A.\n', 4, "public input scalars"),
+        ('    // Four dynamic Fr values: the big-endian 128-bit halves of T and A.\n', 4, "public input scalars"),
         ('    if !vk.is_finished() {\n', 3, "VK trailing bytes check"),
         ('    let ic = ic0 + G1::msm_128(&terms);\n', 4, "interleaved public input multiplication"),
-        ('    // A computed IC accumulator may be zero; encoded points may never be infinity.\n', 5, "pairing preparation"),
+        ('    // Computed IC values may be zero; encoded proof and source points may not.\n', 5, "pairing preparation"),
     ]:
         source = replace_once(source, anchor, f"    profile_phase({phase});\n" + anchor, label)
     # Keep scalar construction BEFORE point decoding, exactly as in the original.

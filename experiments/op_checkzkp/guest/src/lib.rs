@@ -18,7 +18,7 @@ use substrate_bn::{
 
 const DOMAIN: &[u8] = b"sapio/checkzkp/bn254/v1";
 const IC_OFFSET: usize = 4 + PREPARED_PAIRING_BYTES;
-const COMMITMENT_OFFSET: usize = IC_OFFSET + 7 * 64;
+const COMMITMENT_OFFSET: usize = IC_OFFSET + 65 + 4 * 64;
 const PARAMETERS_BYTES: usize = COMMITMENT_OFFSET + 32;
 const PROOF_BYTES: usize = 256;
 
@@ -57,7 +57,7 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     } = arguments;
     if !program.is_empty()
         || parameters.len() != PARAMETERS_BYTES
-        || parameters.get(..4)? != b"G16P"
+        || parameters.get(..4)? != b"G16C"
         || witness.len() != PROOF_BYTES + 32
     {
         return None;
@@ -79,12 +79,11 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
 
     let prepared = PreparedPairing::decode_committed(&parameters[4..4 + PREPARED_PAIRING_BYTES])?;
     let mut vk = Reader::new(&parameters[IC_OFFSET..COMMITMENT_OFFSET]);
-    let ic0 = read_g1(&mut vk)?;
-    let mut terms = [(G1::zero(), 0u128); 6];
+    let ic0 = read_folded_ic(&mut vk)?;
+    let mut terms = [(G1::zero(), 0u128); 4];
     let mut index = 0;
-    // Six public Fr values: the big-endian 128-bit halves of C, T, A.
+    // Four dynamic Fr values: the big-endian 128-bit halves of T and A.
     for digest in [
-        &parameters[COMMITMENT_OFFSET..],
         transaction_digest.as_slice(),
         &witness[PROOF_BYTES..],
     ] {
@@ -103,8 +102,16 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     }
     let ic = ic0 + G1::msm_128(&terms);
 
-    // A computed IC accumulator may be zero; encoded points may never be infinity.
+    // Computed IC values may be zero; encoded proof and source points may not.
     prepared.verify(a, b, c, ic)
+}
+
+fn read_folded_ic(reader: &mut Reader<'_>) -> Option<G1> {
+    match reader.take(1)?[0] {
+        0 => reader.take(64)?.iter().all(|byte| *byte == 0).then_some(G1::zero()),
+        1 => read_g1(reader),
+        _ => None,
+    }
 }
 
 fn read_fq(reader: &mut Reader<'_>) -> Option<Fq> {
