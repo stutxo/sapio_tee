@@ -6,7 +6,7 @@ use crunchy::unroll;
 use rand::Rng;
 
 macro_rules! field_impl {
-    ($name:ident, $modulus:expr, $rsquared:expr, $rcubed:expr, $one:expr, $inv:expr) => {
+    ($name:ident, $multiply:ident, $modulus:expr, $rsquared:expr, $rcubed:expr, $one:expr, $inv:expr) => {
         #[derive(Copy, Clone, PartialEq, Eq, Debug)]
         #[repr(C)]
         pub struct $name(U256);
@@ -166,7 +166,7 @@ macro_rules! field_impl {
 
             #[inline]
             fn mul(mut self, other: $name) -> $name {
-                self.0.mul(&other.0, &U256::from($modulus), $inv);
+                self.0.$multiply(&other.0, &U256::from($modulus), $inv);
 
                 self
             }
@@ -187,6 +187,7 @@ macro_rules! field_impl {
 
 field_impl!(
     Fr,
+    mul, // Fr's public raw-bit setter permits noncanonical intermediate values.
     [
         0x43e1f593f0000001,
         0x2833e84879b97091,
@@ -216,6 +217,7 @@ field_impl!(
 
 field_impl!(
     Fq,
+    mul_bounded, // Fq operands are canonical; q < R/4 implies the short-carry bound.
     [
         0x3c208c16d87cfd47,
         0x97816a916871ca8d,

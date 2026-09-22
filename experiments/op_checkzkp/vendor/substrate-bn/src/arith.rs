@@ -324,6 +324,17 @@ impl U256 {
         }
     }
 
+    /// REDC with other,p < R/2 and self*other < pR, R=2^256.
+    /// Callers establish these bounds without a runtime dispatch.
+    #[inline]
+    pub(crate) fn mul_bounded(&mut self, other: &Self, modulo: &Self, inv: u128) {
+        debug_assert!((other.0[1] | modulo.0[1]) >> 127 == 0);
+        mul_reduce::<true>(&mut self.0, &other.0, &modulo.0, inv);
+        if *self >= *modulo {
+            sub_noborrow(&mut self.0, &modulo.0);
+        }
+    }
+
     /// Square a canonical residue with odd modulus p < 2^255.
     /// Product-scanning REDC uses only the 36 distinct 32-bit square products.
     pub fn square(&mut self, modulo: &Self, inv: u128) {
@@ -409,7 +420,7 @@ impl U256 {
         add_nocarry(&mut other.0, &d.0);
         // p < R/4 gives (2p)^2 < pR, so REDC followed by one
         // subtraction still produces a canonical result.
-        self.mul(&other, modulo, inv);
+        self.mul_bounded(&other, modulo, inv);
         self
     }
 
@@ -421,7 +432,7 @@ impl U256 {
         add_nocarry(&mut self.0, &modulo.0);
         sub_noborrow(&mut self.0, &b.0);
         // (a+p-b)*(a+b) has both factors below 2p, as in mul_sums.
-        self.mul(&sum, modulo, inv);
+        self.mul_bounded(&sum, modulo, inv);
         self
     }
 
