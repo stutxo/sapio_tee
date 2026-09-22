@@ -305,6 +305,26 @@ impl U256 {
         }
     }
 
+    /// Multiply two sums of canonical residues without reducing either sum.
+    pub(crate) fn mul_sums(
+        mut self,
+        b: &Self,
+        c: &Self,
+        d: &Self,
+        modulo: &Self,
+        inv: u128,
+    ) -> Self {
+        debug_assert!(modulo.0[1] >> 126 == 0);
+        debug_assert!(self < *modulo && *b < *modulo && *c < *modulo && *d < *modulo);
+        let mut other = *c;
+        add_nocarry(&mut self.0, &b.0);
+        add_nocarry(&mut other.0, &d.0);
+        // p < R/4 gives (2p)^2 < pR, so REDC followed by one
+        // subtraction still produces a canonical result.
+        self.mul(&other, modulo, inv);
+        self
+    }
+
     /// Turn `self` into its additive inverse (mod `modulo`)
     pub fn neg(&mut self, modulo: &U256) {
         if *self > Self::zero() {
@@ -526,9 +546,9 @@ fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u1
     // Coarsely integrated operand scanning (CIOS), radix 2^32.
     // Same Montgomery R=2^256 as upstream; inv truncated to 32 bits is -p^-1.
     // Each MAC is at most (2^32-1)^2 + 2*(2^32-1) = 2^64-1.
-    // The ninth limb carries the intermediate overflow. As in the original
-    // REDC, at least one input must be reduced, giving an output below 2p.
-    // Both BN254 moduli are below 2^254, so the result fits in 256 bits.
+    // The ninth limb carries intermediate overflow. REDC needs the input
+    // product below pR: either operand is reduced, or both are below 2p
+    // with p < R/4. Both BN254 moduli satisfy this bound, and 2p < R.
     const MASK: u64 = u32::MAX as u64;
     #[inline]
     fn limbs(value: &[u128; 2]) -> [u64; 8] {

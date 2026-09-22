@@ -228,6 +228,29 @@ field_impl!(
     0x9ede7d651eca6ac987d20782e4866389
 );
 
+impl Fq {
+    pub(crate) fn mul_sums(a: Self, b: Self, c: Self, d: Self) -> Self {
+        // Only the U256 intermediates are unreduced; Fq remains canonical.
+        Self(a.0.mul_sums(&b.0, &c.0, &d.0, &Self::modulus(), a.inv()))
+    }
+}
+
+#[test]
+fn fused_sum_product_handles_maximal_montgomery_residues() {
+    let mut maximal = Fq::modulus();
+    maximal.sub(&U256::one(), &Fq::modulus());
+    let values = [Fq::zero(), Fq::one(), Fq(maximal), -Fq(maximal)];
+    for a in values {
+        for b in values {
+            for c in values {
+                for d in values {
+                    assert_eq!(Fq::mul_sums(a, b, c, d), (a + b) * (c + d));
+                }
+            }
+        }
+    }
+}
+
 lazy_static::lazy_static! {
 
     static ref FQ: U256 = U256::from([

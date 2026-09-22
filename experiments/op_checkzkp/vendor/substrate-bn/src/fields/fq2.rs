@@ -141,7 +141,7 @@ impl Mul for Fq2 {
 
         Fq2 {
             c0: aa - bb,
-            c1: (self.c0 + self.c1) * (other.c0 + other.c1) - aa - bb,
+            c1: Fq::mul_sums(self.c0, self.c1, other.c0, other.c1) - aa - bb,
         }
     }
 }

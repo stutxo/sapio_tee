@@ -76,6 +76,14 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
                 let mut reverse = encoded(&b);
                 reverse.mul(&encoded(a), &modulus, inv);
                 assert_eq!(integer(&reverse), expected);
+
+                // With p < R/4, both operands may be below 2p.
+                let left = (a % &p) + &p;
+                let right = &b + &p;
+                let expected = (&left * &right * &r_inverse) % &p;
+                let mut product = encoded(&left);
+                product.mul(&encoded(&right), &modulus, inv);
+                assert_eq!(integer(&product), expected);
             }
         }
     }
