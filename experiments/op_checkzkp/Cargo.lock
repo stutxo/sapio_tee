@@ -551,6 +551,7 @@ dependencies = [
  "sapio-wasm",
  "serde_json",
  "sha2",
+ "substrate-bn",
  "wasmer",
  "wasmer-middlewares",
 ]

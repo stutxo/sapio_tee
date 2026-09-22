@@ -59,6 +59,39 @@ impl Fq12 {
         Fq12 { c0: c0, c1: c1 }
     }
 
+    /// Canonical tower order: Fq12 c0,c1; Fq6 c0,c1,c2; Fq2 c0,c1.
+    pub fn to_big_endian(&self, output: &mut [u8]) -> Option<()> {
+        if output.len() != 384 {
+            return None;
+        }
+        let coefficients = [
+            &self.c0.c0, &self.c0.c1, &self.c0.c2,
+            &self.c1.c0, &self.c1.c1, &self.c1.c2,
+        ];
+        for (coefficient, bytes) in coefficients.iter().zip(output.chunks_exact_mut(64)) {
+            coefficient.to_big_endian(bytes)?;
+        }
+        Some(())
+    }
+
+    pub fn from_big_endian(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 384 {
+            return None;
+        }
+        Some(Self::new(
+            Fq6::new(
+                Fq2::from_big_endian(&bytes[..64])?,
+                Fq2::from_big_endian(&bytes[64..128])?,
+                Fq2::from_big_endian(&bytes[128..192])?,
+            ),
+            Fq6::new(
+                Fq2::from_big_endian(&bytes[192..256])?,
+                Fq2::from_big_endian(&bytes[256..320])?,
+                Fq2::from_big_endian(&bytes[320..])?,
+            ),
+        ))
+    }
+
     fn final_exponentiation_first_chunk(&self) -> Option<Fq12> {
         match self.inverse() {
             Some(b) => {
@@ -358,4 +391,29 @@ impl Neg for Fq12 {
             c1: -self.c1,
         }
     }
+}
+
+#[test]
+fn canonical_encoding_uses_explicit_tower_order() {
+    let coordinate = |value: u64| Fq::new(U256::from(value)).unwrap();
+    let value = Fq12::new(
+        Fq6::new(
+            Fq2::new(coordinate(1), coordinate(2)),
+            Fq2::new(coordinate(3), coordinate(4)),
+            Fq2::new(coordinate(5), coordinate(6)),
+        ),
+        Fq6::new(
+            Fq2::new(coordinate(7), coordinate(8)),
+            Fq2::new(coordinate(9), coordinate(10)),
+            Fq2::new(coordinate(11), coordinate(12)),
+        ),
+    );
+    let mut expected = [0u8; 384];
+    for index in 0..12 {
+        expected[index * 32 + 31] = index as u8 + 1;
+    }
+    let mut encoded = [0u8; 384];
+    value.to_big_endian(&mut encoded).unwrap();
+    assert_eq!(encoded, expected);
+    assert_eq!(Fq12::from_big_endian(&expected), Some(value));
 }

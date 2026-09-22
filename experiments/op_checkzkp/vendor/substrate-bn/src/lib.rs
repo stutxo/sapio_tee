@@ -652,6 +652,101 @@ pub fn miller_loop_batch(pairs: &[(G2, G1)]) -> Result<Gt, CurveError> {
     Ok(Gt(groups::miller_loop_batch(&ps, &qs)))
 }
 
+/// Canonical prepared target (384 bytes), then two 87-line G2 tables.
+pub const PREPARED_PAIRING_BYTES: usize = 384 + 2 * groups::G2_PRECOMP_BYTES;
+
+/// Public fixed-key data for `e(a,b) * e(-ic,gamma) * e(-c,delta) = e(alpha,beta)`.
+///
+/// Preparation validates the source points. Decoding only validates the encoding:
+/// the entire encoded value must be committed before accepting any proof, and its
+/// producer must have validated the source key and derived these coefficients
+/// before that commitment (in particular, before funding a contract).
+pub struct PreparedPairing {
+    target: fields::Fq12,
+    gamma: groups::G2Precomp,
+    delta: groups::G2Precomp,
+}
+
+impl PreparedPairing {
+    /// Validate every fixed point, rejecting infinity, off-curve points, and
+    /// points outside the prime-order subgroups, then derive the fixed data.
+    pub fn prepare(alpha: G1, beta: G2, gamma: G2, delta: G2) -> Option<Self> {
+        fn fixed_g2(point: G2) -> Option<groups::AffineG2> {
+            let point = point.0.to_affine()?;
+            groups::AffineG2::new(*point.x(), *point.y()).ok()
+        }
+
+        let alpha = alpha.0.to_affine()?;
+        let alpha = groups::AffineG1::new(*alpha.x(), *alpha.y()).ok()?;
+        let beta = fixed_g2(beta)?;
+        let gamma = fixed_g2(gamma)?;
+        let delta = fixed_g2(delta)?;
+        Some(Self {
+            target: beta.precompute().miller_loop(&alpha).final_exponentiation()?,
+            gamma: gamma.precompute(),
+            delta: delta.precompute(),
+        })
+    }
+
+    /// Encode exactly `PREPARED_PAIRING_BYTES` public bytes.
+    ///
+    /// Order: target Fq12 c0,c1; each Fq6 c0,c1,c2; each Fq2 c0,c1.
+    /// Then gamma's 87 coefficients and delta's 87 coefficients, each ordered
+    /// ell_0,ell_vw,ell_vv. Every Fq is canonical 32-byte big-endian.
+    pub fn encode(&self, output: &mut [u8]) -> Option<()> {
+        if output.len() != PREPARED_PAIRING_BYTES {
+            return None;
+        }
+        let delta_start = 384 + groups::G2_PRECOMP_BYTES;
+        self.target.to_big_endian(&mut output[..384])?;
+        self.gamma.encode(&mut output[384..delta_start])?;
+        self.delta.encode(&mut output[delta_start..])
+    }
+
+    /// Decode producer-validated, committed fixed data, NEVER witness data.
+    ///
+    /// Enforces exact length, canonical Fq coordinates, and a nonzero target.
+    /// This does NOT establish that the target or lines came from `prepare`,
+    /// nor authenticate a source key. The trusted producer must validate and
+    /// prepare that key before the entire encoding is committed.
+    pub fn decode_committed(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != PREPARED_PAIRING_BYTES {
+            return None;
+        }
+        let target = fields::Fq12::from_big_endian(&bytes[..384])?;
+        if target.is_zero() {
+            return None;
+        }
+        let delta_start = 384 + groups::G2_PRECOMP_BYTES;
+        Some(Self {
+            target,
+            gamma: groups::G2Precomp::decode_committed(&bytes[384..delta_start])?,
+            delta: groups::G2Precomp::decode_committed(&bytes[delta_start..])?,
+        })
+    }
+
+    /// Verify with shared Miller squares and one final exponentiation.
+    ///
+    /// The caller must validate the proof points a,b,c (canonical, on-curve,
+    /// subgroup, non-infinity) and derive ic from its validated public inputs
+    /// and key. A computed ic at infinity is valid and omits its pairing.
+    /// Fixed line tables are borrowed; only b is prepared for this call.
+    /// Returns None for an infinite proof point or a zero Miller product,
+    /// including zero products induced by malformed committed coefficients.
+    pub fn verify(&self, a: G1, b: G2, c: G1, ic: G1) -> Option<bool> {
+        let a = a.0.to_affine()?;
+        let b = b.0.to_affine()?.precompute();
+        let c = (-c.0).to_affine()?;
+        let product = match (-ic.0).to_affine() {
+            Some(ic) => groups::miller_loop_batch_lines(&[
+                (&b, a), (&self.gamma, ic), (&self.delta, c),
+            ]),
+            None => groups::miller_loop_batch_lines(&[(&b, a), (&self.delta, c)]),
+        };
+        Some(product.final_exponentiation()? == self.target)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct AffineG2(groups::AffineG2);

@@ -1,21 +1,25 @@
 //! Experimental Groth16/BN254 verification entirely in guest WASM.
 //!
-//! Fuel limitation: valid proofs exhaust the deployed 100,000,000-unit budget,
-//! so this verifier cannot currently authorize spends through ProgramOracle.
-//! The default opt-level=s build used roughly 486-488 million units per proof
-//! in local fixtures: about 500 million is needed for those cases, not a
-//! worst-case bound. Use run.sh --diagnostic-fuel 1000000000 for headroom;
-//! diagnostic mode never signs and does not change production limits.
+//! Fixed-key pairing data must be derived by validated preparation before funding.
+//! The module and all prepared parameters are committed by the funding key; the
+//! witness cannot select or replace these tables. Canonical decoding alone does
+//! not authenticate arbitrary precomputations against a source verification key.
+//! Diagnostic mode never signs and does not change production limits.
 #![no_std]
 
 #[path = "../../../../examples/vault/guest.rs"]
 mod guest;
 
 use guest::{Arguments, Reader};
-use substrate_bn::{arith::U256, pairing_batch, AffineG1, AffineG2, Fq, Fq2, Fr, Group, Gt, G1, G2};
+use substrate_bn::{
+    arith::U256, AffineG1, AffineG2, Fq, Fq2, Fr, Group, PreparedPairing,
+    PREPARED_PAIRING_BYTES, G1, G2,
+};
 
 const DOMAIN: &[u8] = b"sapio/checkzkp/bn254/v1";
-const VK_BYTES: usize = 896;
+const IC_OFFSET: usize = 4 + PREPARED_PAIRING_BYTES;
+const COMMITMENT_OFFSET: usize = IC_OFFSET + 7 * 64;
+const PARAMETERS_BYTES: usize = COMMITMENT_OFFSET + 32;
 const PROOF_BYTES: usize = 256;
 
 #[no_mangle]
@@ -51,7 +55,10 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
         view,
         witness,
     } = arguments;
-    if !program.is_empty() || parameters.len() != VK_BYTES + 32 || witness.len() != PROOF_BYTES + 32
+    if !program.is_empty()
+        || parameters.len() != PARAMETERS_BYTES
+        || parameters.get(..4)? != b"G16P"
+        || witness.len() != PROOF_BYTES + 32
     {
         return None;
     }
@@ -70,17 +77,14 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     let mut transaction_digest = [0u8; 32];
     guest::hash(&transcript, &mut transaction_digest)?;
 
-    let mut vk = Reader::new(&parameters[..VK_BYTES]);
-    let alpha = read_g1(&mut vk)?;
-    let beta = read_g2(&mut vk)?;
-    let gamma = read_g2(&mut vk)?;
-    let delta = read_g2(&mut vk)?;
+    let prepared = PreparedPairing::decode_committed(&parameters[4..4 + PREPARED_PAIRING_BYTES])?;
+    let mut vk = Reader::new(&parameters[IC_OFFSET..COMMITMENT_OFFSET]);
     let ic0 = read_g1(&mut vk)?;
     let mut terms = [(G1::zero(), 0u128); 6];
     let mut index = 0;
     // Six public Fr values: the big-endian 128-bit halves of C, T, A.
     for digest in [
-        &parameters[VK_BYTES..],
+        &parameters[COMMITMENT_OFFSET..],
         transaction_digest.as_slice(),
         &witness[PROOF_BYTES..],
     ] {
@@ -100,7 +104,7 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     let ic = ic0 + G1::msm_128(&terms);
 
     // A computed IC accumulator may be zero; encoded points may never be infinity.
-    Some(pairing_batch(&[(a, b), (-alpha, beta), (-ic, gamma), (-c, delta)]) == Gt::one())
+    prepared.verify(a, b, c, ic)
 }
 
 fn read_fq(reader: &mut Reader<'_>) -> Option<Fq> {

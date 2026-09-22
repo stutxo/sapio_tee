@@ -24,11 +24,11 @@ bash experiments/op_checkzkp/optimize.sh \
     "$target/wasm32-unknown-unknown/release/checkzkp_guest.wasm" "$target/checkzkp_guest.scored.wasm"
 
 # Default path enforces the actual ProgramOracle limits and validates signatures.
-# The measured BN254 verifier currently exhausts that 100M fuel budget; default
-# failure is the experiment's result, not a successful opcode deployment.
-# The default opt-level=s build measured ~486-488M fuel per proof, so these
-# fixtures need about 500M. Use --diagnostic-fuel 1000000000 for headroom.
-# These measurements are not a worst-case bound for every proof/transaction.
+# The original verifier exceeded that 100M budget. Optimized candidates must
+# pass this unchanged gate; diagnostic fuel measurements alone are insufficient.
+# Fixed-key preparation must validate source parameters before funding. Prepared
+# parameter bytes and module bytes determine a new identity, not an upgrade.
+# Finite benchmark measurements are not a universal worst-case fuel bound.
 # --diagnostic-fuel N explicitly bypasses module admission/changes fuel and NEVER
 # signs: diagnostic success must not be mistaken for a deployable predicate.
 exec cargo run --locked --manifest-path "$manifest" -p checkzkp-probe --release \

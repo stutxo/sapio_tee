@@ -58,30 +58,6 @@ fn profile_phase(phase: i32) {
 
 '''
 
-PAIRING_BATCH = '''pub fn pairing_batch(ps: &[G1], qs: &[G2]) -> Fq12 {
-    let mut p_affines: Vec<AffineG<G1Params>> = Vec::new();
-    let mut q_precomputes: Vec<G2Precomp> = Vec::new();
-    for (p, q) in ps.into_iter().zip(qs.into_iter()) {
-
-        let p_affine = p.to_affine();
-        let q_affine = q.to_affine();
-        let exists = match(p_affine, q_affine)
-        {
-            (None, _) | (_, None) => false,
-            (Some(_p_affine), Some(_q_affine)) => true,
-        };
-
-        if exists {
-            p_affines.push(p.to_affine().unwrap());
-            q_precomputes.push(q.to_affine().unwrap().precompute());
-        }
-    }
-    if q_precomputes.len() == 0 {
-        return Fq12::one();
-    }
-    miller_loop_batch(&q_precomputes, &p_affines).final_exponentiation().expect("miller loop cannot produce zero")
-}
-'''
 
 
 def require(condition, message):
@@ -121,7 +97,7 @@ def instrument_guest(source):
     for anchor, phase, label in [
         ('    let mut proof = Reader::new(&witness[..PROOF_BYTES]);\n', 1, "proof decoding"),
         ('    let mut transcript = [0u8; DOMAIN.len() + 32];\n', 2, "transaction digest"),
-        ('    let mut vk = Reader::new(&parameters[..VK_BYTES]);\n', 3, "VK decoding"),
+        ('    let prepared = PreparedPairing::decode_committed(&parameters[4..4 + PREPARED_PAIRING_BYTES])?;\n', 3, "committed VK decoding"),
         ('    // Six public Fr values: the big-endian 128-bit halves of C, T, A.\n', 4, "public input scalars"),
         ('    if !vk.is_finished() {\n', 3, "VK trailing bytes check"),
         ('    let ic = ic0 + G1::msm_128(&terms);\n', 4, "interleaved public input multiplication"),
@@ -142,26 +118,31 @@ def instrument_guest(source):
 
 
 def instrument_groups(source):
-    body = replace_once(
-        PAIRING_BATCH,
-        '        return Fq12::one();\n',
-        '        profile_phase(8);\n        return Fq12::one();\n',
-        "pairing empty batch return",
+    # Raw and committed-prepared pairing paths share this borrowed-line core.
+    anchor = "fn miller_loop_batch_lines("
+    unique(source, anchor, "shared Miller core")
+    start = source.index(anchor)
+    brace = source.index("{", start)
+    signature = source[start:brace + 1]
+    return MARKER + replace_once(
+        source, signature, signature + "\n    profile_phase(6);",
+        "shared Miller loop entry",
     )
-    body = replace_once(
-        body,
-        '    miller_loop_batch(&q_precomputes, &p_affines).final_exponentiation().expect("miller loop cannot produce zero")\n',
-        '    profile_phase(6);\n'
-        '    let miller = miller_loop_batch(&q_precomputes, &p_affines);\n'
-        '    profile_phase(7);\n'
-        '    let result = miller.final_exponentiation().expect("miller loop cannot produce zero");\n'
-        '    profile_phase(8);\n'
-        '    result\n',
-        "Miller loop and final exponentiation",
-    )
-    # Match the entire original batch implementation, including infinity handling
-    # and repeated affine conversion. Deliberately do not optimize any of it.
-    return replace_once(source, PAIRING_BATCH, MARKER + body, "substrate-bn groups::pairing_batch")
+
+
+def instrument_final_exponentiation(source):
+    anchor = '''    pub fn final_exponentiation(&self) -> Option<Fq12> {
+        self.final_exponentiation_first_chunk()
+            .map(|a| a.final_exponentiation_last_chunk())
+    }'''
+    replacement = '''    pub fn final_exponentiation(&self) -> Option<Fq12> {
+        profile_phase(7);
+        let result = self.final_exponentiation_first_chunk()
+            .map(|a| a.final_exponentiation_last_chunk());
+        profile_phase(8);
+        result
+    }'''
+    return MARKER + replace_once(source, anchor, replacement, "final exponentiation")
 
 
 def run(arguments, environment, capture=False):
@@ -308,9 +289,11 @@ def main():
     require(provenance["package"]["metadata"]["upstream"]["registry-checksum"] == BN_CHECKSUM,
             "Vendored substrate-bn upstream provenance drift")
     groups = bn_directory / "src/groups/mod.rs"
+    fq12 = bn_directory / "src/fields/fq12.rs"
     # Validate anchors before replacing any generated workspace from a prior run.
     generated_guest = instrument_guest(inputs[guest_source_path].decode())
     generated_groups = instrument_groups(groups.read_text())
+    generated_fq12 = instrument_final_exponentiation(fq12.read_text())
     for license_name in ["LICENSE-APACHE", "LICENSE-MIT"]:
         require((bn_directory / license_name).is_file(), f"Missing substrate-bn license: {license_name}")
 
@@ -320,6 +303,7 @@ def main():
     (WORKSPACE / "guest/src").mkdir(parents=True)
     shutil.copytree(bn_directory, WORKSPACE / "substrate-bn")
     (WORKSPACE / "substrate-bn/src/groups/mod.rs").write_text(generated_groups)
+    (WORKSPACE / "substrate-bn/src/fields/fq12.rs").write_text(generated_fq12)
     (WORKSPACE / "guest/Cargo.toml").write_bytes(inputs[guest_manifest])
     (WORKSPACE / "guest/src/lib.rs").write_text(generated_guest)
     (WORKSPACE / "guest/src/abi.rs").write_bytes(inputs[helper_path])

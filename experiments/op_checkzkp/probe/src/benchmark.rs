@@ -1,3 +1,4 @@
+use crate::prepared::{prepare_parameters, PREPARED_PARAMETERS_BYTES};
 use crate::runtime::{
     validate_inputs, Admission, Measurement, MeteredGuest, DIAGNOSTIC_FUEL, PHASE_NAMES,
 };
@@ -10,7 +11,7 @@ use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // Harness input-file bounds, not changes to any production resource limit.
 const MAX_CORPUS_BYTES: usize = 64 * 1024 * 1024;
@@ -143,27 +144,70 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     let mut verification_fuel = 0u64;
     let mut linear_memory_bytes = 0u64;
     let mut verification_time = Duration::ZERO;
+    let mut preparation_time = Duration::ZERO;
+    let mut preparation_rejections = 0usize;
+    let mut guest_cases = 0usize;
+    let mut full_cases = 0usize;
+    let mut valid_parameters = None;
     for fixture in &corpus.cases {
+        // The unchanged raw corpus has already passed the independent arkworks
+        // reference. Preparation is deterministic, fixed-key-only work outside
+        // guest metering; the guest still meters all prepared-byte decoding.
+        let started = Instant::now();
+        let prepared = prepare_parameters(&fixture.parameters);
+        preparation_time += started.elapsed();
+        let parameters = match prepared {
+            Ok(parameters) => parameters,
+            Err(error) => {
+                ensure!(
+                    fixture.kind == Kind::Malformed && fixture.expected == Expected::Malformed,
+                    "fixed-key preparation failed for full case {:?}: {error:#}",
+                    fixture.name
+                );
+                preparation_rejections += 1;
+                println!(
+                    "CASE stage=preparation name={:?} result=malformed error={error:#}",
+                    fixture.name
+                );
+                continue;
+            }
+        };
+        validate_inputs(&parameters, &fixture.view, &fixture.witness)
+            .with_context(|| format!("prepared input bounds for {:?}", fixture.name))?;
         let measured = guest
-            .measure(&fixture.parameters, &fixture.view, &fixture.witness)
+            .measure(&parameters, &fixture.view, &fixture.witness)
             .with_context(|| format!("evaluating {:?}", fixture.name))?;
         check_result(fixture, &measured)?;
+        guest_cases += 1;
         linear_memory_bytes = linear_memory_bytes.max(measured.memory_bytes);
         if matches!(fixture.kind, Kind::Full) {
+            full_cases += 1;
             // Includes every valid, invalid-equation, and transaction-mutated
             // full-path case; never reward a shortcut through malformed input.
             verification_fuel = verification_fuel.max(measured.fuel);
             verification_time = verification_time.max(measured.elapsed);
         }
         println!(
-            "CASE name={:?} result={} fuel={} linear_memory_bytes={}",
+            "CASE stage=guest name={:?} result={} fuel={} linear_memory_bytes={}",
             fixture.name, measured.result, measured.fuel, measured.memory_bytes
         );
+        if valid_parameters.is_none() && fixture.expected == Expected::Accept {
+            valid_parameters = Some(parameters);
+        }
     }
+    ensure!(
+        full_cases == corpus.cases.iter().filter(|case| case.kind == Kind::Full).count(),
+        "not every full-path case reached the guest"
+    );
+    ensure!(
+        guest_cases + preparation_rejections == corpus.cases.len(),
+        "corpus case accounting mismatch"
+    );
+    let valid_parameters = valid_parameters.context("first accepted fixture was not evaluated")?;
     // Use another fresh instance, not a retained post-rejection store.
     fixtures::verify_fixture(valid).context("independent reference replay")?;
     let replay = guest
-        .measure(&valid.parameters, &valid.view, &valid.witness)
+        .measure(&valid_parameters, &valid.view, &valid.witness)
         .context("valid fixture replay after rejected fixtures")?;
     check_result(valid, &replay)?;
     verification_fuel = verification_fuel.max(replay.fuel);
@@ -178,7 +222,7 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
         );
         let diagnostic = MeteredGuest::new(&bytes, DIAGNOSTIC_FUEL, Admission::Profile)?;
         let measured = diagnostic
-            .measure(&valid.parameters, &valid.view, &valid.witness)
+            .measure(&valid_parameters, &valid.view, &valid.witness)
             .context("profiling first valid fixture")?;
         check_result(valid, &measured)?;
         let phases = measured
@@ -197,9 +241,10 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
         None
     };
 
-    // No METRIC line is emitted until every reference, guest, replay, and
-    // optional profile check has succeeded. The scored artifact is never instrumented.
-    println!("PASS offline native/WASM corpus and valid replay; timings are secondary; verification_ms is max full-case allocation+verification time");
+    // No METRIC line is emitted until every reference, preparation, guest,
+    // replay, and optional profile check has succeeded. Never instrument the
+    // scored artifact or exclude a full case from its worst-case fuel.
+    println!("PASS offline native/WASM corpus and valid replay; timings are secondary; verification_ms is max full-case allocation+verification time; preparation_ms is total raw-key validation+preparation time for all corpus cases, outside guest metering");
     if let Some((phases, total, calls)) = profile {
         println!("PROFILE diagnostic only; fixture={:?}; marker calls={calls}; hook instruction overhead included; phases never substitute for the scored total", valid.name);
         for (index, (name, fuel)) in PHASE_NAMES.iter().zip(phases).enumerate() {
@@ -210,6 +255,14 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     }
     println!("METRIC module_bytes={}", module.len());
     println!("METRIC linear_memory_bytes={linear_memory_bytes}");
+    println!("METRIC prepared_parameters_bytes={PREPARED_PARAMETERS_BYTES}");
+    println!("METRIC preparation_rejections={preparation_rejections}");
+    println!("METRIC guest_cases={guest_cases}");
+    println!("METRIC full_cases={full_cases}");
+    println!(
+        "METRIC preparation_ms={:.3}",
+        preparation_time.as_secs_f64() * 1000.0
+    );
     println!(
         "METRIC compile_ms={:.3}",
         guest.compile_time.as_secs_f64() * 1000.0

@@ -13,6 +13,10 @@ use alloc::vec;
 // We skip the first element (1) as we would need to skip over it in the main loop
 const ATE_LOOP_COUNT_NAF : [u8; 64] = [1,0,1,0,0,0,3,0,3,0,0,0,3,0,1,0,3,0,0,3,0,0,0,0,0,1,0,0,3,0,1,0,0,3,0,0,0,0,3,0,1,0,0,0,3,0,3,0,0,1,0,0,0,3,0,0,3,0,1,0,1,0,0,0];
 
+// 64 doubling steps, 21 signed additions, and two Frobenius additions.
+pub const G2_PRECOMP_COEFFS: usize = 87;
+pub const G2_PRECOMP_BYTES: usize = G2_PRECOMP_COEFFS * 3 * 64;
+
 pub trait GroupElement
     : Sized
     + Copy
@@ -609,54 +613,63 @@ pub struct EllCoeffs {
 
 #[derive(PartialEq, Eq)]
 pub struct G2Precomp {
-    pub q: AffineG<G2Params>,
     pub coeffs: Vec<EllCoeffs>,
 }
 
 impl G2Precomp {
     pub fn miller_loop(&self, g1: &AffineG<G1Params>) -> Fq12 {
-        let mut f = Fq12::one();
+        miller_loop_batch_lines(&[(self, *g1)])
+    }
 
-        let mut idx = 0;
-
-        for i in ATE_LOOP_COUNT_NAF.iter() {
-            let c = &self.coeffs[idx];
-            idx += 1;
-            f = f.squared()
-                .mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-
-            if *i != 0 {
-                let c = &self.coeffs[idx];
-                idx += 1;
-                f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-            }
+    pub fn encode(&self, output: &mut [u8]) -> Option<()> {
+        if output.len() != G2_PRECOMP_BYTES || self.coeffs.len() != G2_PRECOMP_COEFFS {
+            return None;
         }
+        for (coefficient, bytes) in self.coeffs.iter().zip(output.chunks_exact_mut(192)) {
+            coefficient.ell_0.to_big_endian(&mut bytes[..64])?;
+            coefficient.ell_vw.to_big_endian(&mut bytes[64..128])?;
+            coefficient.ell_vv.to_big_endian(&mut bytes[128..])?;
+        }
+        Some(())
+    }
 
-        let c = &self.coeffs[idx];
-        idx += 1;
-        f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-
-        let c = &self.coeffs[idx];
-        f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
-
-        f
+    /// Structural decoding only; the caller must trust the committed producer.
+    pub fn decode_committed(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != G2_PRECOMP_BYTES {
+            return None;
+        }
+        let mut coeffs = Vec::with_capacity(G2_PRECOMP_COEFFS);
+        for bytes in bytes.chunks_exact(192) {
+            coeffs.push(EllCoeffs {
+                ell_0: Fq2::from_big_endian(&bytes[..64])?,
+                ell_vw: Fq2::from_big_endian(&bytes[64..128])?,
+                ell_vv: Fq2::from_big_endian(&bytes[128..])?,
+            });
+        }
+        Some(Self { coeffs })
     }
 }
 
-pub fn miller_loop_batch(g2_precomputes: &Vec<G2Precomp>, g1_vec: &Vec<AffineG<G1Params>>) -> Fq12 {
+pub fn miller_loop_batch(g2_precomputes: &[G2Precomp], g1_vec: &[AffineG1]) -> Fq12 {
+    let pairs: Vec<_> = g2_precomputes.iter().zip(g1_vec.iter().copied()).collect();
+    miller_loop_batch_lines(&pairs)
+}
+
+/// Shared Miller squares over borrowed, complete prepared-line tables.
+pub fn miller_loop_batch_lines(pairs: &[(&G2Precomp, AffineG1)]) -> Fq12 {
     let mut f = Fq12::one();
 
     let mut idx = 0;
 
     for i in ATE_LOOP_COUNT_NAF.iter() {
         f = f.squared();
-        for (g2_precompute, g1) in g2_precomputes.iter().zip(g1_vec.iter()) {
+        for (g2_precompute, g1) in pairs {
             let c = &g2_precompute.coeffs[idx];
             f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
         }
         idx += 1;
         if *i != 0 {
-            for (g2_precompute, g1) in g2_precomputes.iter().zip(g1_vec.iter()) {
+            for (g2_precompute, g1) in pairs {
                 let c = &g2_precompute.coeffs[idx];
                 f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
             }
@@ -664,16 +677,39 @@ pub fn miller_loop_batch(g2_precomputes: &Vec<G2Precomp>, g1_vec: &Vec<AffineG<G
         }
     }
 
-    for (g2_precompute, g1) in g2_precomputes.iter().zip(g1_vec.iter()) {
+    for (g2_precompute, g1) in pairs {
         let c = &g2_precompute.coeffs[idx];
         f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
     }
     idx += 1;
-    for (g2_precompute, g1) in g2_precomputes.iter().zip(g1_vec.iter()) {
+    for (g2_precompute, g1) in pairs {
         let c = &g2_precompute.coeffs[idx];
         f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
     }
     f
+}
+
+#[test]
+fn prepared_line_encoding_uses_ell_and_coordinate_order() {
+    let coordinate = |value: usize| Fq::new(U256::from(value as u64)).unwrap();
+    let prepared = G2Precomp {
+        coeffs: (0..G2_PRECOMP_COEFFS).map(|index| {
+            let start = index * 6 + 1;
+            EllCoeffs {
+                ell_0: Fq2::new(coordinate(start), coordinate(start + 1)),
+                ell_vw: Fq2::new(coordinate(start + 2), coordinate(start + 3)),
+                ell_vv: Fq2::new(coordinate(start + 4), coordinate(start + 5)),
+            }
+        }).collect(),
+    };
+    let mut expected = vec![0u8; G2_PRECOMP_BYTES];
+    for (index, bytes) in expected.chunks_exact_mut(32).enumerate() {
+        bytes[24..].copy_from_slice(&(index as u64 + 1).to_be_bytes());
+    }
+    let mut encoded = vec![0u8; G2_PRECOMP_BYTES];
+    prepared.encode(&mut encoded).unwrap();
+    assert_eq!(encoded, expected);
+    assert!(G2Precomp::decode_committed(&expected).unwrap() == prepared);
 }
 
 #[test]
@@ -738,7 +774,7 @@ impl AffineG<G2Params> {
     pub fn precompute(&self) -> G2Precomp {
         let mut r = self.to_jacobian();
 
-        let mut coeffs = Vec::with_capacity(102);
+        let mut coeffs = Vec::with_capacity(G2_PRECOMP_COEFFS);
 
         let q_neg = self.neg();
         for i in ATE_LOOP_COUNT_NAF.iter() {
@@ -758,7 +794,6 @@ impl AffineG<G2Params> {
         coeffs.push(r.mixed_addition_step_for_flipped_miller_loop(&q2));
 
         G2Precomp {
-            q: *self,
             coeffs: coeffs,
         }
     }
@@ -832,17 +867,18 @@ fn test_prepared_g2() {
 
     let g2_p = g2.to_affine().unwrap().precompute();
 
+    assert_eq!(g2.to_affine().unwrap(), AffineG {
+        x: Fq2::new(
+            Fq::new(U256([286108132425575157823044300810193365120, 40955922372263072279965766273066553545])).unwrap(),
+            Fq::new(U256([51787456028377068413742525949644831103, 18727496177066613612143648473641354138])).unwrap()
+        ),
+        y: Fq2::new(
+            Fq::new(U256([105235307093009526756443741536710213857, 56697136982397507595538316605420403515])).unwrap(),
+            Fq::new(U256([329285813328264858787093963282305459902, 40620233227497131789363095249389429612])).unwrap()
+        )
+    });
+
     let expected_g2_p = G2Precomp {
-        q: AffineG {
-            x: Fq2::new(
-                Fq::new(U256([286108132425575157823044300810193365120, 40955922372263072279965766273066553545])).unwrap(),
-                Fq::new(U256([51787456028377068413742525949644831103, 18727496177066613612143648473641354138])).unwrap()
-            ),
-            y: Fq2::new(
-                Fq::new(U256([105235307093009526756443741536710213857, 56697136982397507595538316605420403515])).unwrap(),
-                Fq::new(U256([329285813328264858787093963282305459902, 40620233227497131789363095249389429612])).unwrap()
-            )
-        },
         coeffs: vec![
             EllCoeffs { ell_0: Fq2::new(Fq::new(U256([145915152615018094207274265949237364577, 7720188347992263845704223037750674843])).unwrap(), Fq::new(U256([1642602221754736777334297091439332137, 43455737427254701713230610624368790806])).unwrap()), ell_vw: Fq2::new(Fq::new(U256([192300176042178641247789718482757908684, 15253255261571338892647481759611271748])).unwrap(), Fq::new(U256([84481530492606440649863882423335628050, 47407062771372090504997924471673219553])).unwrap()), ell_vv: Fq2::new(Fq::new(U256([232941999867492381013751617901190279960, 33161335727531633874118709394498248694])).unwrap(), Fq::new(U256([205159091107726234051689046255658875895, 18784742195738106358087607099254122817])).unwrap()) },
             EllCoeffs { ell_0: Fq2::new(Fq::new(U256([44903717410722925336080339155272113598, 2432148164440313442445265360131108750])).unwrap(), Fq::new(U256([115058944839679151514931430187558137193, 19913547532675326995005163334665928687])).unwrap()), ell_vw: Fq2::new(Fq::new(U256([162225342243516818284353803749727397649, 2902812998987289816105769597190405892])).unwrap(), Fq::new(U256([280882305470180330735174149091034017688, 45000755139204939118391532933575113126])).unwrap()), ell_vv: Fq2::new(Fq::new(U256([81439170073299243743458979294198176188, 8269567577349210062003854855333109246])).unwrap(), Fq::new(U256([229588642195598894684486216729209468602, 50120631775179825949138513731773141671])).unwrap()) },

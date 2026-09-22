@@ -1,6 +1,7 @@
 //! Local-only Groth16 feasibility experiment. Synthetic funding, no network.
 //! Diagnostic mode may bypass the module byte cap and increase fuel; it never signs.
 mod benchmark;
+mod prepared;
 mod runtime;
 
 use anyhow::{bail, ensure, Context, Result};
@@ -276,7 +277,16 @@ fn legacy(path: PathBuf, diagnostic_fuel: Option<u64>) -> Result<()> {
         "Fresh experimental trusted setup: {:.3}s; secrets remain in this process",
         started.elapsed().as_secs_f64()
     );
-    let parameters = prover.parameters();
+    // Validate and prepare the fixed source key once, before committing the
+    // resulting parameters in ProgramInstance and deriving its funding key.
+    // Proof generation and the independent native verifier retain the raw VK.
+    let started = Instant::now();
+    let parameters = prepared::prepare_parameters(&prover.parameters())?;
+    println!(
+        "Fixed-key preparation before funding: {:.3}s; parameters={} bytes",
+        started.elapsed().as_secs_f64(),
+        parameters.len()
+    );
     if let Some(fuel) = diagnostic_fuel {
         let psbt = transaction(oracle.public_root().public_key.x_only_public_key().0)?;
         let witness = prove(&prover, &psbt)?;

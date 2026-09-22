@@ -17,6 +17,25 @@ impl Fq2 {
         Fq2 { c0: c0, c1: c1 }
     }
 
+    /// Canonical c0, c1 coordinates, each a 32-byte big-endian Fq.
+    pub fn to_big_endian(&self, output: &mut [u8]) -> Option<()> {
+        if output.len() != 64 {
+            return None;
+        }
+        U256::from(self.c0).to_big_endian(&mut output[..32]).ok()?;
+        U256::from(self.c1).to_big_endian(&mut output[32..]).ok()
+    }
+
+    pub fn from_big_endian(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 64 {
+            return None;
+        }
+        Some(Self::new(
+            Fq::new(U256::from_slice(&bytes[..32]).ok()?)?,
+            Fq::new(U256::from_slice(&bytes[32..]).ok()?)?,
+        ))
+    }
+
     pub fn scale(&self, by: Fq) -> Self {
         Fq2 {
             c0: self.c0 * by,
