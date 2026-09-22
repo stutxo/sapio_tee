@@ -304,15 +304,15 @@ impl Fq12 {
         let z5 = self.c1.c2;
 
         let tmp = z0 * z1;
-        let t0 = (z0 + z1) * (z1.mul_by_nonresidue() + z0) - tmp - tmp.mul_by_nonresidue();
+        let t0 = z0.squared() + z1.squared().mul_by_nonresidue();
         let t1 = tmp + tmp;
 
         let tmp = z2 * z3;
-        let t2 = (z2 + z3) * (z3.mul_by_nonresidue() + z2) - tmp - tmp.mul_by_nonresidue();
+        let t2 = z2.squared() + z3.squared().mul_by_nonresidue();
         let t3 = tmp + tmp;
 
         let tmp = z4 * z5;
-        let t4 = (z4 + z5) * (z5.mul_by_nonresidue() + z4) - tmp - tmp.mul_by_nonresidue();
+        let t4 = z4.squared() + z5.squared().mul_by_nonresidue();
         let t5 = tmp + tmp;
 
         let z0 = t0 - z0;
