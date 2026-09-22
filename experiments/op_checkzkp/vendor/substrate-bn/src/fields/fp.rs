@@ -275,12 +275,16 @@ impl Fq {
         let mut quotient = U256::zero();
         let mut remainder = 0u64;
         unroll! {
-            for i in 0..8 {
-                let index = 7 - i;
-                let digit = (self.0.0[index / 4] >> (32 * (index % 4))) as u32 as u64;
-                let numerator = (remainder << 32) | digit;
-                quotient.0[index / 4] |= ((numerator / 3) as u128) << (32 * (index % 4));
-                remainder = numerator % 3;
+            for i in 0..4 {
+                let index = 3 - i;
+                let digit = (self.0.0[index / 2] >> (64 * (index % 2))) as u64;
+                // 2^64 = 3*0x5555...5555 + 1: carry the remainder
+                // across a full native word without a 128-bit division.
+                let rem = digit % 3 + remainder;
+                let carry = (rem >= 3) as u64;
+                let word = digit / 3 + remainder * 0x5555555555555555 + carry;
+                quotient.0[index / 2] |= (word as u128) << (64 * (index % 2));
+                remainder = rem - carry * 3;
             }
         }
         let correction = match remainder {
