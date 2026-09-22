@@ -1,5 +1,11 @@
 Unreleased
 
+- Move Terraform state to a remote S3 backend: a dedicated versioned,
+  encrypted, public-access-blocked bucket with the native S3 lockfile,
+  migrated with init -migrate-state -force-copy. The recovery record
+  (setup.json, measurements, verified identity, AWS root certificate) is
+  backed up under recovery/ in the same bucket.
+
 - Attach an Elastic IP to the test parent: the public oracle keeps one stable
   address across instance replacement and stop/start. The ssh_tunnel output
   and public_ip now refer to it.

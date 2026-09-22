@@ -144,8 +144,16 @@ flake outputs, not stale result-* links, and roots them in .local/terraform/.
 The parent does not install Nix or compile anything. Do not remove those local
 GC roots while a saved plan still references their outputs.
 
-State, local variable files and saved *.tfplan files are ignored; preserve
-state securely and keep .terraform.lock.hcl under version control. No private
+State is remote: an S3 backend in a dedicated versioned, encrypted,
+public-access-blocked bucket (sapio-tee-tfstate-493031039834, created
+out-of-band because the backend cannot bootstrap its own storage), using
+terraform's native S3 lockfile. Local variable files and saved *.tfplan files
+are ignored; keep .terraform.lock.hcl under version control. The recovery
+record (setup.json, measurements, verified identity, AWS root cert) is
+additionally uploaded under recovery/ in the same bucket; setup.json and
+measurements.json are the irreplaceable trust anchors, the rest is
+re-derivable. terraform destroy does not touch the state bucket; empty it
+explicitly (it is versioned) if you ever retire the deployment. No private
 root, KMS key material, AWS credentials or SSH private keys are Terraform inputs.
 The public setup record and key ARN are state/output data.
 

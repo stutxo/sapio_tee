@@ -1,4 +1,13 @@
 terraform {
+  # Remote state: shared, locked, versioned. The bucket is created out-of-band
+  # (see USAGE.txt) because the backend cannot bootstrap its own storage.
+  backend "s3" {
+    bucket       = "sapio-tee-tfstate-493031039834"
+    key          = "sapio-tee/terraform.tfstate"
+    region       = "us-east-1"
+    use_lockfile = true
+  }
+
   required_version = ">= 1.7, < 2.0"
 
   required_providers {
