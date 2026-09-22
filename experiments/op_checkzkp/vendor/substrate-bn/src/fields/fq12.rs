@@ -146,12 +146,16 @@ impl Fq12 {
     }
 
     pub fn frobenius_map(&self, power: usize) -> Self {
+        let coefficient = frobenius_coeffs_c1(power);
+        let c1 = self.c1.frobenius_map(power);
         Fq12 {
             c0: self.c0.frobenius_map(power),
-            c1: self
-                .c1
-                .frobenius_map(power)
-                .scale(frobenius_coeffs_c1(power)),
+            c1: if power % 2 == 0 {
+                let real = *coefficient.real();
+                Fq6::new(c1.c0.scale(real), c1.c1.scale(real), c1.c2.scale(real))
+            } else {
+                c1.scale(coefficient)
+            },
         }
     }
 
@@ -499,5 +503,25 @@ fn paired_sparse_lines_match_dense_products() {
             f.mul_by_024_pair(a[0], a[1], a[2], b[0], b[1], b[2]),
             f * line(a) * line(b),
         );
+    }
+}
+
+#[test]
+fn frobenius_powers_match_ordinary_exponentiation() {
+    use rand::{rngs::StdRng, SeedableRng};
+    let mut rng = StdRng::from_seed([19; 32]);
+    for index in 0..4 {
+        let value = match index {
+            0 => Fq12::zero(),
+            1 => Fq12::one(),
+            _ => Fq12::random(&mut rng),
+        };
+        let mut expected = value;
+        for power in 0..4 {
+            assert_eq!(value.frobenius_map(power), expected);
+            if power != 3 {
+                expected = expected.pow(Fq::modulus());
+            }
+        }
     }
 }

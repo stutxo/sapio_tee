@@ -123,10 +123,21 @@ impl Fq6 {
     }
 
     pub fn frobenius_map(&self, power: usize) -> Self {
-        Fq6 {
-            c0: self.c0.frobenius_map(power),
-            c1: self.c1.frobenius_map(power) * frobenius_coeffs_c1(power),
-            c2: self.c2.frobenius_map(power) * frobenius_coeffs_c2(power),
+        let c1 = frobenius_coeffs_c1(power);
+        let c2 = frobenius_coeffs_c2(power);
+        if power % 2 == 0 {
+            // Every supported even-power coefficient lies in the base field.
+            Fq6 {
+                c0: self.c0,
+                c1: self.c1.scale(*c1.real()),
+                c2: self.c2.scale(*c2.real()),
+            }
+        } else {
+            Fq6 {
+                c0: self.c0.frobenius_map(power),
+                c1: self.c1.frobenius_map(power) * c1,
+                c2: self.c2.frobenius_map(power) * c2,
+            }
         }
     }
 }
