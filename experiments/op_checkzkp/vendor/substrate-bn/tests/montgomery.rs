@@ -68,6 +68,7 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
         // operand orders: it is sufficient for either input to be reduced.
         for a in &values {
             for raw_b in &values {
+                assert_eq!(encoded(a).cmp(&encoded(raw_b)), a.cmp(raw_b));
                 let b = raw_b % &p;
                 let expected = (a * &b * &r_inverse) % &p;
                 let mut product = encoded(a);

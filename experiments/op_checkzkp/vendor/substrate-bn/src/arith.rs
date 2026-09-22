@@ -172,11 +172,16 @@ impl PartialOrd for U512 {
 impl Ord for U256 {
     #[inline]
     fn cmp(&self, other: &U256) -> Ordering {
-        for (a, b) in self.0.iter().zip(other.0.iter()).rev() {
-            if *a < *b {
-                return Ordering::Less;
-            } else if *a > *b {
-                return Ordering::Greater;
+        unroll! {
+            for i in 0..4 {
+                let shift = 64 * (1 - i % 2);
+                let a = (self.0[1 - i / 2] >> shift) as u64;
+                let b = (other.0[1 - i / 2] >> shift) as u64;
+                if a < b {
+                    return Ordering::Less;
+                } else if a > b {
+                    return Ordering::Greater;
+                }
             }
         }
 
