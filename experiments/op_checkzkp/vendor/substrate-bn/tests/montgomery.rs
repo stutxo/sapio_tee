@@ -70,6 +70,13 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
             for raw_b in &values {
                 assert_eq!(encoded(a).cmp(&encoded(raw_b)), a.cmp(raw_b));
                 let b = raw_b % &p;
+                let canonical_a = a % &p;
+                let mut sum = encoded(&canonical_a);
+                sum.add(&encoded(&b), &modulus);
+                assert_eq!(integer(&sum), (&canonical_a + &b) % &p);
+                let mut difference = encoded(&canonical_a);
+                difference.sub(&encoded(&b), &modulus);
+                assert_eq!(integer(&difference), (&canonical_a + &p - &b) % &p);
                 let expected = (a * &b * &r_inverse) % &p;
                 let mut product = encoded(a);
                 product.mul(&encoded(&b), &modulus, inv);

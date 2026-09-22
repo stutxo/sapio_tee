@@ -475,13 +475,12 @@ fn combine_u128(hi: u128, lo: u128) -> u128 {
 
 #[inline]
 fn adc(a: u128, b: u128, carry: &mut u128) -> u128 {
-    let (a1, a0) = split_u128(a);
-    let (b1, b0) = split_u128(b);
-    let (c, r0) = split_u128(a0 + b0 + *carry);
-    let (c, r1) = split_u128(a1 + b1 + c);
-    *carry = c;
-
-    combine_u128(r1, r0)
+    let (low, carry0) = (a as u64).overflowing_add(b as u64);
+    let (low, carry1) = low.overflowing_add(*carry as u64);
+    let (high, carry2) = ((a >> 64) as u64).overflowing_add((b >> 64) as u64);
+    let (high, carry3) = high.overflowing_add((carry0 | carry1) as u64);
+    *carry = (carry2 | carry3) as u128;
+    combine_u128(high as u128, low as u128)
 }
 
 #[inline]
