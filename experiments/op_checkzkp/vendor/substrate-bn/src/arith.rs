@@ -329,6 +329,18 @@ impl U256 {
         self
     }
 
+    pub(crate) fn difference_of_squares(mut self, b: &Self, modulo: &Self, inv: u128) -> Self {
+        debug_assert!(modulo.0[1] >> 126 == 0);
+        debug_assert!(self < *modulo && *b < *modulo);
+        let mut sum = self;
+        add_nocarry(&mut sum.0, &b.0);
+        add_nocarry(&mut self.0, &modulo.0);
+        sub_noborrow(&mut self.0, &b.0);
+        // (a+p-b)*(a+b) has both factors below 2p, as in mul_sums.
+        self.mul(&sum, modulo, inv);
+        self
+    }
+
     /// Turn `self` into its additive inverse (mod `modulo`)
     pub fn neg(&mut self, modulo: &U256) {
         if *self > Self::zero() {

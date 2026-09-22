@@ -109,7 +109,7 @@ impl FieldElement for Fq2 {
         let ab = self.c0 * self.c1;
 
         Fq2 {
-            c0: (self.c0 - self.c1) * (self.c0 + self.c1),
+            c0: Fq::difference_of_squares(self.c0, self.c1),
             c1: ab + ab,
         }
     }

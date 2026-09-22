@@ -233,6 +233,10 @@ impl Fq {
         // Only the U256 intermediates are unreduced; Fq remains canonical.
         Self(a.0.mul_sums(&b.0, &c.0, &d.0, &Self::modulus(), a.inv()))
     }
+
+    pub(crate) fn difference_of_squares(a: Self, b: Self) -> Self {
+        Self(a.0.difference_of_squares(&b.0, &Self::modulus(), a.inv()))
+    }
 }
 
 #[test]
@@ -242,6 +246,7 @@ fn fused_sum_product_handles_maximal_montgomery_residues() {
     let values = [Fq::zero(), Fq::one(), Fq(maximal), -Fq(maximal)];
     for a in values {
         for b in values {
+            assert_eq!(Fq::difference_of_squares(a, b), a * a - b * b);
             for c in values {
                 for d in values {
                     assert_eq!(Fq::mul_sums(a, b, c, d), (a + b) * (c + d));
