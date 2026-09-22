@@ -1,4 +1,4 @@
-use crate::fields::{const_fq, FieldElement, Fq, Fq12, Fq2, Fr};
+use crate::fields::{const_fq, FieldElement, Fq, Fq12, Fq2, Fq6, Fr};
 use crate::arith::U256;
 use core::{fmt, ops::{Add, Mul, Neg, Sub}};
 use rand::Rng;
@@ -657,15 +657,31 @@ pub fn miller_loop_batch(g2_precomputes: &[G2Precomp], g1_vec: &[AffineG1]) -> F
 
 /// Shared Miller squares over borrowed, complete prepared-line tables.
 pub fn miller_loop_batch_lines(pairs: &[(&G2Precomp, AffineG1)]) -> Fq12 {
+    if pairs.is_empty() {
+        return Fq12::one();
+    }
     let mut f = Fq12::one();
 
     let mut idx = 0;
 
     for i in ATE_LOOP_COUNT_NAF.iter() {
-        f = f.squared();
-        for (g2_precompute, g1) in pairs {
+        // The initial accumulator is one. Constructing the first evaluated line
+        // eliminates its redundant square and full sparse multiplication.
+        if idx != 0 {
+            f = f.squared();
+        }
+        for (pair_index, (g2_precompute, g1)) in pairs.iter().enumerate() {
             let c = &g2_precompute.coeffs[idx];
-            f = f.mul_by_024(c.ell_0, c.ell_vw.scale(g1.y), c.ell_vv.scale(g1.x));
+            let vw = c.ell_vw.scale(g1.y);
+            let vv = c.ell_vv.scale(g1.x);
+            f = if idx == 0 && pair_index == 0 {
+                Fq12::new(
+                    Fq6::new(c.ell_0, Fq2::zero(), vv),
+                    Fq6::new(Fq2::zero(), vw, Fq2::zero()),
+                )
+            } else {
+                f.mul_by_024(c.ell_0, vw, vv)
+            };
         }
         idx += 1;
         if *i != 0 {
