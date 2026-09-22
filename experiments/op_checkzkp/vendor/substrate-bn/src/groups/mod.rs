@@ -622,9 +622,9 @@ impl G2Precomp {
             return None;
         }
         for (coefficient, bytes) in self.coeffs.iter().zip(output.chunks_exact_mut(192)) {
-            coefficient.ell_0.to_big_endian(&mut bytes[..64])?;
-            coefficient.ell_vw.to_big_endian(&mut bytes[64..128])?;
-            coefficient.ell_vv.to_big_endian(&mut bytes[128..])?;
+            coefficient.ell_0.to_montgomery_big_endian(&mut bytes[..64])?;
+            coefficient.ell_vw.to_montgomery_big_endian(&mut bytes[64..128])?;
+            coefficient.ell_vv.to_montgomery_big_endian(&mut bytes[128..])?;
         }
         Some(())
     }
@@ -637,9 +637,9 @@ impl G2Precomp {
         let mut coeffs = Vec::with_capacity(G2_PRECOMP_COEFFS);
         for bytes in bytes.chunks_exact(192) {
             coeffs.push(EllCoeffs {
-                ell_0: Fq2::from_big_endian(&bytes[..64])?,
-                ell_vw: Fq2::from_big_endian(&bytes[64..128])?,
-                ell_vv: Fq2::from_big_endian(&bytes[128..])?,
+                ell_0: Fq2::from_montgomery_big_endian(&bytes[..64])?,
+                ell_vw: Fq2::from_montgomery_big_endian(&bytes[64..128])?,
+                ell_vv: Fq2::from_montgomery_big_endian(&bytes[128..])?,
             });
         }
         Some(Self { coeffs })
@@ -717,6 +717,7 @@ pub fn miller_loop_batch_lines(pairs: &[(&G2Precomp, AffineG1)]) -> Fq12 {
 
 #[test]
 fn prepared_line_encoding_uses_ell_and_coordinate_order() {
+    use num_bigint::BigUint;
     let coordinate = |value: usize| Fq::new(U256::from(value as u64)).unwrap();
     let prepared = G2Precomp {
         coeffs: (0..G2_PRECOMP_COEFFS)
@@ -730,9 +731,14 @@ fn prepared_line_encoding_uses_ell_and_coordinate_order() {
             })
             .collect(),
     };
+    let mut modulus_bytes = [0u8; 32];
+    Fq::modulus().to_big_endian(&mut modulus_bytes).unwrap();
+    let modulus = BigUint::from_bytes_be(&modulus_bytes);
+    let radix = BigUint::from(1u8) << 256usize;
     let mut expected = vec![0u8; G2_PRECOMP_BYTES];
     for (index, bytes) in expected.chunks_exact_mut(32).enumerate() {
-        bytes[24..].copy_from_slice(&(index as u64 + 1).to_be_bytes());
+        let word = (BigUint::from(index + 1) * &radix % &modulus).to_bytes_be();
+        bytes[32 - word.len()..].copy_from_slice(&word);
     }
     let mut encoded = vec![0u8; G2_PRECOMP_BYTES];
     prepared.encode(&mut encoded).unwrap();

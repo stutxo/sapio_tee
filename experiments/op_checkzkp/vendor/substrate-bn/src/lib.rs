@@ -718,20 +718,22 @@ impl PreparedPairing {
     ///
     /// Order: target Fq12 c0,c1; each Fq6 c0,c1,c2; each Fq2 c0,c1.
     /// Then gamma's 87 coefficients and delta's 87 coefficients, each ordered
-    /// ell_0,ell_vw,ell_vv. Every Fq is canonical 32-byte big-endian.
+    /// ell_0,ell_vw,ell_vv. Every Fq x is encoded as x * 2^256 mod q,
+    /// a canonical residue below q in exactly 32 big-endian bytes. This
+    /// representation is specific to prepared data, not proof/source coordinates.
     pub fn encode(&self, output: &mut [u8]) -> Option<()> {
         if output.len() != PREPARED_PAIRING_BYTES {
             return None;
         }
         let delta_start = 384 + groups::G2_PRECOMP_BYTES;
-        self.target.to_big_endian(&mut output[..384])?;
+        self.target.to_montgomery_big_endian(&mut output[..384])?;
         self.gamma.encode(&mut output[384..delta_start])?;
         self.delta.encode(&mut output[delta_start..])
     }
 
     /// Decode producer-validated, committed fixed data, NEVER witness data.
     ///
-    /// Enforces exact length, canonical Fq coordinates, and a nonzero target.
+    /// Enforces exact length, Montgomery residues below q, and a nonzero target.
     /// This does NOT establish that the target or lines came from `prepare`,
     /// nor authenticate a source key. The trusted producer must validate and
     /// prepare that key before the entire encoding is committed.
@@ -739,7 +741,7 @@ impl PreparedPairing {
         if bytes.len() != PREPARED_PAIRING_BYTES {
             return None;
         }
-        let target = fields::Fq12::from_big_endian(&bytes[..384])?;
+        let target = fields::Fq12::from_montgomery_big_endian(&bytes[..384])?;
         if target.is_zero() {
             return None;
         }

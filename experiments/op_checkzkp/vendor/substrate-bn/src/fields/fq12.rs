@@ -58,8 +58,8 @@ impl Fq12 {
         Fq12 { c0: c0, c1: c1 }
     }
 
-    /// Canonical tower order: Fq12 c0,c1; Fq6 c0,c1,c2; Fq2 c0,c1.
-    pub fn to_big_endian(&self, output: &mut [u8]) -> Option<()> {
+    /// Prepared Montgomery tower order: Fq12 c0,c1; Fq6 c0,c1,c2; Fq2 c0,c1.
+    pub fn to_montgomery_big_endian(&self, output: &mut [u8]) -> Option<()> {
         if output.len() != 384 {
             return None;
         }
@@ -72,25 +72,25 @@ impl Fq12 {
             &self.c1.c2,
         ];
         for (coefficient, bytes) in coefficients.iter().zip(output.chunks_exact_mut(64)) {
-            coefficient.to_big_endian(bytes)?;
+            coefficient.to_montgomery_big_endian(bytes)?;
         }
         Some(())
     }
 
-    pub fn from_big_endian(bytes: &[u8]) -> Option<Self> {
+    pub fn from_montgomery_big_endian(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 384 {
             return None;
         }
         Some(Self::new(
             Fq6::new(
-                Fq2::from_big_endian(&bytes[..64])?,
-                Fq2::from_big_endian(&bytes[64..128])?,
-                Fq2::from_big_endian(&bytes[128..192])?,
+                Fq2::from_montgomery_big_endian(&bytes[..64])?,
+                Fq2::from_montgomery_big_endian(&bytes[64..128])?,
+                Fq2::from_montgomery_big_endian(&bytes[128..192])?,
             ),
             Fq6::new(
-                Fq2::from_big_endian(&bytes[192..256])?,
-                Fq2::from_big_endian(&bytes[256..320])?,
-                Fq2::from_big_endian(&bytes[320..])?,
+                Fq2::from_montgomery_big_endian(&bytes[192..256])?,
+                Fq2::from_montgomery_big_endian(&bytes[256..320])?,
+                Fq2::from_montgomery_big_endian(&bytes[320..])?,
             ),
         ))
     }
@@ -443,8 +443,9 @@ impl Neg for Fq12 {
 }
 
 #[test]
-fn canonical_encoding_uses_explicit_tower_order() {
+fn montgomery_encoding_uses_explicit_tower_order() {
     use crate::arith::U256;
+    use num_bigint::BigUint;
     let coordinate = |value: u64| Fq::new(U256::from(value)).unwrap();
     let value = Fq12::new(
         Fq6::new(
@@ -458,14 +459,19 @@ fn canonical_encoding_uses_explicit_tower_order() {
             Fq2::new(coordinate(11), coordinate(12)),
         ),
     );
+    let mut modulus_bytes = [0u8; 32];
+    Fq::modulus().to_big_endian(&mut modulus_bytes).unwrap();
+    let modulus = BigUint::from_bytes_be(&modulus_bytes);
+    let radix = BigUint::from(1u8) << 256usize;
     let mut expected = [0u8; 384];
-    for index in 0..12 {
-        expected[index * 32 + 31] = index as u8 + 1;
+    for (index, bytes) in expected.chunks_exact_mut(32).enumerate() {
+        let word = (BigUint::from(index + 1) * &radix % &modulus).to_bytes_be();
+        bytes[32 - word.len()..].copy_from_slice(&word);
     }
     let mut encoded = [0u8; 384];
-    value.to_big_endian(&mut encoded).unwrap();
+    value.to_montgomery_big_endian(&mut encoded).unwrap();
     assert_eq!(encoded, expected);
-    assert_eq!(Fq12::from_big_endian(&expected), Some(value));
+    assert_eq!(Fq12::from_montgomery_big_endian(&expected), Some(value));
 }
 
 #[test]

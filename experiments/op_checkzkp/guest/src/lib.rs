@@ -57,7 +57,7 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     } = arguments;
     if !program.is_empty()
         || parameters.len() != PARAMETERS_BYTES
-        || parameters.get(..4)? != b"G16C"
+        || parameters.get(..4)? != b"G16M"
         || witness.len() != PROOF_BYTES + 32
     {
         return None;

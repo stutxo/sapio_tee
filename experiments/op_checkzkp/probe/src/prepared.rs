@@ -16,7 +16,7 @@ const RAW_FIXED_KEY_BYTES: usize = 64 + 3 * 128;
 const IC_BYTES: usize = 7 * 64;
 const RAW_VK_BYTES: usize = RAW_FIXED_KEY_BYTES + IC_BYTES;
 const RAW_PARAMETERS_BYTES: usize = RAW_VK_BYTES + 32;
-// G16C || pairing || tagged folded IC (65) || IC3..IC6 (256) || public C (32).
+// G16M || Montgomery pairing || tagged folded IC (65) || IC3..IC6 (256) || C (32).
 pub const PREPARED_PARAMETERS_BYTES: usize = 4 + PREPARED_PAIRING_BYTES + 65 + 4 * 64 + 32;
 
 /// Accept only the original 928-byte VK || C format, never prepared parameters.
@@ -57,7 +57,7 @@ pub fn prepare_parameters(raw: &[u8]) -> Result<Vec<u8>> {
     let prepared = PreparedPairing::prepare(alpha, beta, gamma, delta)
         .context("preparing validated fixed pairing key")?;
     let mut output = vec![0u8; PREPARED_PARAMETERS_BYTES];
-    output[..4].copy_from_slice(b"G16C");
+    output[..4].copy_from_slice(b"G16M");
     prepared
         .encode(&mut output[4..4 + PREPARED_PAIRING_BYTES])
         .context("encoding prepared pairing key")?;

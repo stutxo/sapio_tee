@@ -236,6 +236,15 @@ field_impl!(
 );
 
 impl Fq {
+    /// Decode a canonical Montgomery residue x * 2^256 mod q, without reduction.
+    pub(crate) fn from_montgomery(value: U256) -> Option<Self> {
+        if value < Self::modulus() {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn mul_sums(a: Self, b: Self, c: Self, d: Self) -> Self {
         // Only the U256 intermediates are unreduced; Fq remains canonical.
         Self(a.0.mul_sums(&b.0, &c.0, &d.0, &Self::modulus(), a.inv()))
