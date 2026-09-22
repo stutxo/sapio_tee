@@ -176,8 +176,11 @@ schema dependencies used by that oracle. Read the actual locks when auditing.
 Reference reuse is not a claim that these repositories or this integration
 have received a security audit.
 
-No successful real Nitro boot, live NSM attestation, IAM-policy enforcement or
-KMS derivation test is claimed by this repository's local software checks.
+One operator-run live deployment on signet has now exercised a real Nitro
+boot, attested KMS derivation, genuine-document client verification, program
+signing, service-restart root recovery, and a denied unattested derivation;
+see VERIFICATION.txt. That single run is not third-party reproduction, soak
+evidence, or a mainnet procedure.
 A successful Nix image build proves packaging, not hardware behavior, policy
 correctness or bit-for-bit reproducibility. Require independently repeated
 build/measurement checks plus live non-debug Nitro setup/sign/restart/recovery

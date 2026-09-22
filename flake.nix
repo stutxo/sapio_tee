@@ -77,14 +77,31 @@
           meta.platforms = [ "aarch64-linux" ];
         };
         # The pinned init package predates buildGoModule's env attribute set.
-        # Preserve its source/flags while moving CGO_ENABLED to the current API.
-        # Cross-built for aarch64: pure Go (CGO_ENABLED=0), statically linked.
-        init = pkgsAarch64.callPackage "${enclaver.inputs.nitro-util}/init" {
-          buildGoModule = args: pkgsAarch64.buildGoModule
-            ((builtins.removeAttrs args [ "CGO_ENABLED" ]) // {
-              env.CGO_ENABLED = args.CGO_ENABLED;
-            });
-        };
+        # Current nixpkgs manages env.CGO_ENABLED itself (default 1) and drops
+        # the old integer attribute, which silently produced a dynamically
+        # linked glibc init that cannot exec as PID 1 inside the enclave
+        # (found on first real Nitro boot, E36); a CGO_ENABLED=0 pure-Go
+        # cross build errors in this toolchain and static glibc fails to link.
+        # Build against musl with a fully static external link instead, and
+        # assert static linking at build time so this cannot silently regress.
+        init =
+          let
+            built = pkgsMusl.callPackage "${enclaver.inputs.nitro-util}/init" {
+              buildGoModule = args: pkgsMusl.buildGoModule (
+                (builtins.removeAttrs args [ "CGO_ENABLED" ]) // {
+                  ldflags = (args.ldflags or [ ]) ++ [ "-linkmode=external" "-extldflags=-static" ];
+                }
+              );
+            };
+          in
+          built.overrideAttrs (old: {
+            installPhase = (old.installPhase or "") + ''
+              if ${pkgs.binutils}/bin/readelf -l "$out/bin/init" | grep -q INTERP; then
+                echo "enclave init must be statically linked (no INTERP)" >&2
+                exit 1
+              fi
+            '';
+          });
         nitro = enclaver.inputs.nitro-util;
         # nitro-util's EIF builder, with the compiled-from-source init swapped in
         # and arch pinned to aarch64: the EIF runs on Graviton Nitro Enclaves,

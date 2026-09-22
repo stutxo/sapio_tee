@@ -47,6 +47,9 @@ def build_policy(admin_role_arn, parent_role_arn, pcr0, key_arn=None):
                 "Principal": {"AWS": admin_role_arn},
                 "Action": [
                     "kms:DescribeKey", "kms:GetKeyPolicy", "kms:ListKeyPolicies",
+                    # Read-only status the Terraform AWS provider requires to
+                    # manage a key; rotation is impossible on asymmetric keys.
+                    "kms:GetKeyRotationStatus",
                     "kms:PutKeyPolicy", "kms:EnableKey", "kms:DisableKey",
                     "kms:UpdateKeyDescription", "kms:TagResource", "kms:UntagResource",
                     "kms:ListResourceTags", "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion",

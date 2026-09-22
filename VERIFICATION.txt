@@ -1,3 +1,62 @@
+LIVE VERIFICATION: FIRST NITRO DEPLOYMENT (SIGNET)
+
+Scope:
+- First real-hardware run of the one-apply Terraform workflow: AWS account
+  493031039834, us-east-1, m7g.xlarge on AL2023 arm64, signet network with a
+  mutinynet tip blockhash. First EIF boot on Nitro, first attested KMS
+  derivation, first genuine-document client verification.
+
+Defects found by live execution (fixed in this commit set):
+- The cross-built eif-init was dynamically linked against a Nix-store glibc.
+  Current nixpkgs buildGoModule manages env.CGO_ENABLED (default 1) and drops
+  the pinned package's legacy integer attribute, so the intended static build
+  never happened. PID 1 could not exec; nitro-cli reported E36 (boot failure,
+  VsockTimeoutError) with an empty guest console. The init now builds against
+  musl with a fully static external link, and a readelf INTERP assertion in
+  flake.nix fails the build if it is ever dynamic again. Static glibc and
+  pure-Go CGO_ENABLED=0 variants were tried first and fail in this toolchain.
+- The generated KMS policy omitted kms:GetKeyRotationStatus, which the
+  Terraform AWS provider reads after CreateKey; the first apply deadlocked on
+  state refresh. Added to the admin statement. Recovery sequence: manual
+  terraform-mode PutKeyPolicy (the earlier CLI-mode patch also left a policy
+  Id mismatch), terraform untaint on the healthy key, converged re-apply.
+
+Live evidence (2026-09-22, instance i-05290dc57b6c8946a):
+- Manual nitro-cli run-enclave on the fixed EIF: State RUNNING, and
+  describe-enclaves PCR0/1/2 equal the local build's pcr.json exactly
+  (PCR0 e96b6051c415a4a4c4372eb00fc2ed1ee12a1491b3dc5107bf908b125d6b145b233e
+  5cc7fc767ef52c4fe7702e7471aa). Through the enclaver wrapper: odyn seeds
+  entropy from the NSM device, ingress/egress/KMS proxies start, the app
+  binds, /health answers 503 before setup.
+- terraform apply completed: cloud-init, service activation and the
+  per-instance SSM readiness check passed; setup derived the root through
+  the attested proxy from the signet settings.
+- A genuine NSM attestation document verified with the hardened
+  scripts/verify-attestation.py in a fresh hash-enforced venv
+  (--require-hashes): chain to the independently downloaded AWS Nitro root
+  G1, ES384 signature, PCR0/1/2 equal to the independently built
+  measurements, fresh nonce echo, identity user_data binding, exact settings
+  and exact program profile (generated on the parent from the independently
+  built aarch64 binary), plus the new xpub base58check/network/secp256k1
+  checks. verified-identity.json emitted.
+- examples/program_oracle against the verified identity through an SSM port
+  forwarding session: all 17 scenarios PASS (registered pay-at-least, inline
+  v1 CTV, inline v2, script path, traps and fuel exhaustion).
+- systemctl restart of the service (enclave terminated, rebooted,
+  re-provisioned through KMS) returned a byte-identical public identity:
+  same root, no operator input.
+- Negative authorization: as the administrator role, DeriveSharedSecret
+  without recipient attestation fails "with an explicit deny in a
+  resource-based policy".
+
+Limitations:
+- One operator run on one account: no third-party reproduction of build,
+  measurements or verification. The local EIF build was cache-warm; a cold
+  rebuild is unverified here.
+- No soak: availability, upgrades, KMS policy-change workflow and EC2
+  stop/start recovery (versus the exercised service restart) are untested.
+- The verified xpub is a signet tpub; nothing here transacted real value.
+
 SOFTWARE VERIFICATION: OPTIONAL TERRAFORM VPC CREATION
 
 Scope:

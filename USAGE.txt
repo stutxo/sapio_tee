@@ -180,8 +180,11 @@ explicitly remove that lifecycle guard, review terraform destroy, and confirm:
 it deletes the host/artifacts/role and schedules KMS deletion after 30 days.
 Once deleted, that key/root cannot be recovered. Never destroy a funded root.
 
-Real EC2 boot, live KMS access, Nitro attestation and hardware restart/recovery
-still require AWS integration validation. Use synthetic transactions only.
+Live AWS integration (real boot, attested KMS derivation, genuine-document
+verification, signing, service-restart recovery, negative authorization) has
+now been exercised once on a signet test deployment; see VERIFICATION.txt.
+It has not been independently reproduced or soak-tested. Use synthetic
+transactions only.
 
 Prepare the parent and KMS manually
 ----------------------------------

@@ -10,7 +10,7 @@ transactions on the client; send their supported program instances and spend
 requests to the enclave. Custom inline predicates need no enclave rebuild.
 See the “Program compatibility and authoring” section in [USAGE.txt](USAGE.txt).
 
-> **Status:** **Real Nitro boot, live KMS provisioning, and enclave restart/recovery have not been exercised.** Software/build results and their scope are recorded in [verification evidence](VERIFICATION.txt); this is not a production-custody assurance. Review the [security model](SECURITY.txt).
+> **Status:** a live Nitro boot, attested KMS provisioning, client attestation verification, program signing, and service-restart recovery **have now been exercised once** on a signet test deployment; see [verification evidence](VERIFICATION.txt). That is one operator run — not third-party reproduction, soak evidence, or a production-custody assurance. Review the [security model](SECURITY.txt).
 
 ## How it works
 

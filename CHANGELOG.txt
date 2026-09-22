@@ -1,5 +1,27 @@
 Unreleased
 
+- Fix the first-live-boot defect: the cross-built enclave init was dynamically
+  linked against a Nix-store glibc. Current nixpkgs buildGoModule manages
+  env.CGO_ENABLED itself and drops the pinned package's legacy integer
+  attribute, so the intended CGO_ENABLED=0 never applied; PID 1 could not
+  exec inside the enclave and nitro-cli reported E36 with an empty guest
+  console. Build the init against musl with a fully static external link and
+  assert no INTERP segment at build time so this cannot silently regress.
+  The EIF and its measurements change; a redeploy updates the PCR-bound KMS
+  policy in place and replaces the disposable parent.
+- Add kms:GetKeyRotationStatus to the generated policy's admin statement: the
+  Terraform AWS provider reads it after CreateKey, and the first live apply
+  deadlocked on state refresh without it. It is read-only and asymmetric keys
+  cannot rotate. Recovery: manual terraform-mode PutKeyPolicy, untaint,
+  converged re-apply.
+- Record the first live Nitro deployment evidence (signet): real boot with
+  describe-enclaves PCRs matching the build, attested KMS derivation, a
+  genuine NSM document verified by the hardened verifier against independent
+  measurements and the AWS root, all 17 signing scenarios against the
+  verified identity, byte-identical root recovery across a service restart,
+  and an explicitly denied unattested DeriveSharedSecret. This is one
+  operator run, not third-party reproduction or a production assurance.
+
 - Harden the attestation verifier after independent review: verify() itself
   now requires exactly the PCR0/1/2 pin set rather than relying on its CLI
   caller, and the verified xpub is base58check-decoded, matched against the
