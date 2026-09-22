@@ -565,16 +565,6 @@ fn test_affine_jacobian_conversion() {
 }
 
 #[inline]
-fn two_inv() -> Fq {
-    const_fq([
-        9781510331150239090,
-        15059239858463337189,
-        10331104244869713732,
-        2249375503248834476,
-    ])
-}
-
-#[inline]
 fn twist_mul_by_q_x() -> Fq2 {
     Fq2::new(
         const_fq([
@@ -920,13 +910,13 @@ impl G2 {
     }
 
     fn doubling_step_for_flipped_miller_loop(&mut self) -> EllCoeffs {
-        let a = (self.x * self.y).scale(two_inv());
+        let a = (self.x * self.y).halved();
         let b = self.y.squared();
         let c = self.z.squared();
         let d = c + c + c;
         let e = G2Params::coeff_b() * d;
         let f = e + e + e;
-        let g = (b + f).scale(two_inv());
+        let g = (b + f).halved();
         let h = (self.y + self.z).squared() - (b + c);
         let i = e - b;
         let j = self.x.squared();

@@ -341,6 +341,15 @@ impl U256 {
         self
     }
 
+    pub(crate) fn halve(&mut self, modulo: &Self) {
+        debug_assert!(modulo.0[1] >> 127 == 0 && !modulo.is_even());
+        debug_assert!(*self < *modulo);
+        if !self.is_even() {
+            add_nocarry(&mut self.0, &modulo.0);
+        }
+        div2(&mut self.0);
+    }
+
     /// Turn `self` into its additive inverse (mod `modulo`)
     pub fn neg(&mut self, modulo: &U256) {
         if *self > Self::zero() {

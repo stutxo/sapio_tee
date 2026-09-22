@@ -237,6 +237,11 @@ impl Fq {
     pub(crate) fn difference_of_squares(a: Self, b: Self) -> Self {
         Self(a.0.difference_of_squares(&b.0, &Self::modulus(), a.inv()))
     }
+
+    pub(crate) fn halved(mut self) -> Self {
+        self.0.halve(&Self::modulus());
+        self
+    }
 }
 
 #[test]
@@ -245,6 +250,7 @@ fn fused_sum_product_handles_maximal_montgomery_residues() {
     maximal.sub(&U256::one(), &Fq::modulus());
     let values = [Fq::zero(), Fq::one(), Fq(maximal), -Fq(maximal)];
     for a in values {
+        assert_eq!(a.halved() + a.halved(), a);
         for b in values {
             assert_eq!(Fq::difference_of_squares(a, b), a * a - b * b);
             for c in values {
