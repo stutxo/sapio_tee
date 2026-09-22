@@ -622,9 +622,15 @@ impl G2Precomp {
             return None;
         }
         for (coefficient, bytes) in self.coeffs.iter().zip(output.chunks_exact_mut(192)) {
-            coefficient.ell_0.to_montgomery_big_endian(&mut bytes[..64])?;
-            coefficient.ell_vw.to_montgomery_big_endian(&mut bytes[64..128])?;
-            coefficient.ell_vv.to_montgomery_big_endian(&mut bytes[128..])?;
+            coefficient
+                .ell_0
+                .to_montgomery_big_endian(&mut bytes[..64])?;
+            coefficient
+                .ell_vw
+                .to_montgomery_big_endian(&mut bytes[64..128])?;
+            coefficient
+                .ell_vv
+                .to_montgomery_big_endian(&mut bytes[128..])?;
         }
         Some(())
     }

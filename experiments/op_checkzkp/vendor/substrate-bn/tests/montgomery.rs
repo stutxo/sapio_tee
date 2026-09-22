@@ -70,7 +70,10 @@ fn montgomery_carries_match_independent_integer_arithmetic() {
             let canonical_a = a % &p;
             let mut square = encoded(&canonical_a);
             square.square(&modulus, inv);
-            assert_eq!(integer(&square), (&canonical_a * &canonical_a * &r_inverse) % &p);
+            assert_eq!(
+                integer(&square),
+                (&canonical_a * &canonical_a * &r_inverse) % &p
+            );
             for raw_b in &values {
                 assert_eq!(encoded(a).cmp(&encoded(raw_b)), a.cmp(raw_b));
                 let b = raw_b % &p;

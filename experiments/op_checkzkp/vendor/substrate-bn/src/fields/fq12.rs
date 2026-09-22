@@ -262,7 +262,7 @@ impl Fq12 {
         }
     }
 
-    /// Accumulate two sparse lines with 23 Fq2 products instead of 26.
+    /// Accumulate two sparse lines with 21 Fq2 products instead of 26.
     pub fn mul_by_024_pair(
         &self,
         a0: Fq2,
@@ -489,9 +489,21 @@ fn paired_sparse_lines_match_dense_products() {
         )
     };
     for index in 0..64 {
-        let f = if index == 0 { Fq12::zero() } else { Fq12::random(&mut rng) };
-        let mut a = [Fq2::random(&mut rng), Fq2::random(&mut rng), Fq2::random(&mut rng)];
-        let mut b = [Fq2::random(&mut rng), Fq2::random(&mut rng), Fq2::random(&mut rng)];
+        let f = if index == 0 {
+            Fq12::zero()
+        } else {
+            Fq12::random(&mut rng)
+        };
+        let mut a = [
+            Fq2::random(&mut rng),
+            Fq2::random(&mut rng),
+            Fq2::random(&mut rng),
+        ];
+        let mut b = [
+            Fq2::random(&mut rng),
+            Fq2::random(&mut rng),
+            Fq2::random(&mut rng),
+        ];
         if index < 3 {
             a = [Fq2::zero(); 3];
             a[index] = Fq2::one();

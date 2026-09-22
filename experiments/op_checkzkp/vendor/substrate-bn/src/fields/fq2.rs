@@ -66,15 +66,14 @@ impl Fq2 {
         // 3*b_twist = 9/(9+i) = (9/82)*(9-i). Fuse the factor
         // three and avoid a general Fq2 multiplication or conjugations.
         let eight = self.doubled().doubled().doubled();
-        Self::new(
-            eight.c0 + self.c0 + self.c1,
-            eight.c1 + self.c1 - self.c0,
-        ).scale(crate::fields::const_fq([
-            0x9168c5b062e5ff12,
-            0x65af5018ad07a2d2,
-            0x3272d31f197d565e,
-            0x2c9f210801f7f840,
-        ]))
+        Self::new(eight.c0 + self.c0 + self.c1, eight.c1 + self.c1 - self.c0).scale(
+            crate::fields::const_fq([
+                0x9168c5b062e5ff12,
+                0x65af5018ad07a2d2,
+                0x3272d31f197d565e,
+                0x2c9f210801f7f840,
+            ]),
+        )
     }
 
     pub fn frobenius_map(&self, power: usize) -> Self {

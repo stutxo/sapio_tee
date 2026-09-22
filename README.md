@@ -144,6 +144,12 @@ the returned signature with `validate_program_response`, and checks rejection of
 an invalid proof and changed transaction under the original 100,000,000 fuel cap.
 Both commands are local-only; funding is synthetic and nothing is broadcast.
 
+After 50 experiments, the frozen full-path maximum is **65,786,641 fuel**,
+down from 488,320,714 (86.5%). The scored module is 63,683 bytes against the
+unchanged 65,536-byte cap; parameters are 34,149 bytes, the witness is 288 bytes,
+and linear memory is 8 MiB against the unchanged 64 MiB cap. Fresh synthetic
+requests also pass the actual production signing and response-validation gate.
+
 **Preparation is a security boundary.** The sole producer in
 [`probe/src/prepared.rs`](experiments/op_checkzkp/probe/src/prepared.rs) validates
 every original key point before computing the constant pairing, fixed G2 lines,
@@ -152,12 +158,19 @@ authenticate arbitrary tables. Use this validated producer before deriving the
 funding address; the complete module and prepared parameters determine a new
 program identity, not an upgrade of existing funded outputs.
 
-The prepared format is `G16C || pairing[33792] || folded_IC[65] ||
-IC3..IC6[256] || C[32]`, totaling 34,149 bytes. Only the computed folded IC may
-encode infinity: tag zero with 64 zero bytes; finite points use tag one and
-canonical coordinates. Original source and proof points still forbid infinity.
-All 14 full-path corpus cases reach WASM; malformed source-key cases rejected
-during preparation are reported separately, never counted as guest rejections.
+The prepared format is `G16M || pairing[33792] || folded_IC[65] ||
+IC3..IC6[256] || C[32]`, totaling 34,149 bytes. Each pairing-field value `x` is
+encoded as the canonical Montgomery residue `x * 2^256 mod q` in 32 big-endian
+bytes; decoding still rejects every residue at or above `q`. This avoids
+repeating field conversions during each spend. The previous `G16C` tag is not
+accepted. Source-key, proof, and IC point coordinates retain their ordinary
+canonical encoding. Only the computed folded IC may encode infinity: tag zero
+with 64 zero bytes; finite points use tag one and canonical coordinates.
+Original source and proof points still forbid infinity.
+All 43 frozen outcomes are checked independently with arkworks: 29 execute in
+WASM, and 14 malformed source-key cases are rejected during preparation, never
+counted as guest rejections. All 14 full-path cases reach WASM, followed by a
+valid replay in a fresh instance.
 The corpus maximum is not a universal worst-case bound. This remains an
 experimental single-party setup, not audited custody software or a Nitro
 performance measurement; never fund its disposable keys.

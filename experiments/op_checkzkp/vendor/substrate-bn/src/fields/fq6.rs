@@ -219,8 +219,8 @@ impl Mul for Fq6 {
         let v4 = self.c2 * other.c2;
         let v1 = (a02 + self.c1) * (b02 + other.c1);
         let v_minus = a_minus * b_minus;
-        let v_minus_two = ((a_minus + self.c2).doubled() - self.c0)
-            * ((b_minus + other.c2).doubled() - other.c0);
+        let v_minus_two =
+            ((a_minus + self.c2).doubled() - self.c0) * ((b_minus + other.c2).doubled() - other.c0);
         let odd = (v1 - v_minus).halved();
         let middle = v_minus - v0;
         let c3 = (middle - (v_minus_two - v1).third()).halved() + v4.doubled();
@@ -254,7 +254,11 @@ fn cubic_product_matches_schoolbook_convolution() {
             2 => Fq6::new(Fq2::zero(), Fq2::zero(), Fq2::one()),
             _ => Fq6::random(&mut rng),
         };
-        let b = if index == 3 { Fq6::zero() } else { Fq6::random(&mut rng) };
+        let b = if index == 3 {
+            Fq6::zero()
+        } else {
+            Fq6::random(&mut rng)
+        };
         assert_eq!(a * b, schoolbook_product(a, b));
     }
 }

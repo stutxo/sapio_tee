@@ -395,10 +395,14 @@ impl U256 {
         }
         // a² + m*p < p² + R*p < R² for p < R/2.
         debug_assert_eq!(carry, 0);
-        self.0[0] = result[0] as u128 | (result[1] as u128) << 32
-            | (result[2] as u128) << 64 | (result[3] as u128) << 96;
-        self.0[1] = result[4] as u128 | (result[5] as u128) << 32
-            | (result[6] as u128) << 64 | (result[7] as u128) << 96;
+        self.0[0] = result[0] as u128
+            | (result[1] as u128) << 32
+            | (result[2] as u128) << 64
+            | (result[3] as u128) << 96;
+        self.0[1] = result[4] as u128
+            | (result[5] as u128) << 32
+            | (result[6] as u128) << 64
+            | (result[7] as u128) << 96;
         if *self >= *modulo {
             sub_noborrow(&mut self.0, &modulo.0);
         }
@@ -665,7 +669,12 @@ fn mac_digit(from_index: usize, acc: &mut [u128; 4], b: &[u128; 2], c: u128) {
 }
 
 #[inline]
-fn mul_reduce<const SHORT: bool>(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u128) {
+fn mul_reduce<const SHORT: bool>(
+    this: &mut [u128; 2],
+    by: &[u128; 2],
+    modulus: &[u128; 2],
+    inv: u128,
+) {
     // Coarsely integrated operand scanning (CIOS), radix 2^32.
     // Same Montgomery R=2^256 as upstream; inv truncated to 32 bits is -p^-1.
     // Each MAC is at most (2^32-1)^2 + 2*(2^32-1) = 2^64-1.

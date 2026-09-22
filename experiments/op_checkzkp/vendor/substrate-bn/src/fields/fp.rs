@@ -289,12 +289,16 @@ impl Fq {
         }
         let correction = match remainder {
             1 => const_fq([
-                0xd2c05d6490535385, 0xba56470b9af68708,
-                0xd03583cf0100e593, 0x2042def740cbc01b,
+                0xd2c05d6490535385,
+                0xba56470b9af68708,
+                0xd03583cf0100e593,
+                0x2042def740cbc01b,
             ]),
             2 => const_fq([
-                0x69602eb24829a9c3, 0xdd2b2385cd7b4384,
-                0xe81ac1e7808072c9, 0x10216f7ba065e00d,
+                0x69602eb24829a9c3,
+                0xdd2b2385cd7b4384,
+                0xe81ac1e7808072c9,
+                0x10216f7ba065e00d,
             ]),
             _ => return Self(quotient),
         };

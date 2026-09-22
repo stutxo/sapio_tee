@@ -2,14 +2,18 @@ Unreleased
 
 - Optimize the experimental pure-WASM BN254 Groth16 authorization verifier
   without changing production limits or the SHA256-secret/transaction relation.
-  Retain radix-32 Montgomery products, extension-field specializations,
-  published subgroup/seed chains, joint public-input multiplication, and pinned
-  WASM optimization. Validate and commit prepared fixed-key data before funding;
-  this changes program identities and introduces an explicit trusted preparation
-  boundary, not a migration for existing funded outputs.
-  The 25-run research segment reduced the frozen full-path maximum from
-  488,320,714 to 86,507,624 fuel. Fresh synthetic requests passed actual unchanged
-  ProgramOracle signing and validate_program_response under the 100M cap.
+  Retain bounded radix-32 Montgomery products, native-word carry/comparison
+  arithmetic, symmetric squaring, paired sparse Miller lines, five-product
+  cubic multiplication, published subgroup/seed chains, joint public-input
+  multiplication, and pinned WASM optimization. Validate and commit prepared
+  fixed-key data before funding; the G16M format uses range-checked Montgomery
+  residues for pairing data. This changes program identities and introduces an
+  explicit trusted preparation boundary, not a migration for funded outputs.
+  The 50-experiment research run reduced the frozen full-path maximum from
+  488,320,714 to 65,786,641 fuel. The module is 63,683 bytes under the unchanged
+  65,536-byte cap. Fresh synthetic requests passed actual unchanged ProgramOracle
+  signing and validate_program_response under the 100M fuel cap. The frozen
+  maximum is not a universal fuel bound.
   No deployment, real funding, broadcasting, or Nitro timing measurement.
 
 - Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
