@@ -1,0 +1,67 @@
+BIP-446 OP_TEMPLATEHASH emulation: inline v1 example
+
+Sources and licensing
+---------------------
+predicate.rs is this repository's emulation of the BIP-446 template hash,
+written against the specification text of:
+  https://github.com/bitcoin/bips/blob/master/bip-0446.md
+  (BIP-446 OP_TEMPLATEHASH, Draft, assigned 2026-02-06, CC0-1.0)
+guest.rs is ../vault/guest.rs, included by path at compile time: an
+unmodified, byte-for-byte copy of upstream evaluators/common.rs whose
+repository, revision, SHA-256 and MPL-2.0 licensing are recorded in
+examples/vault/PROVENANCE.txt. It supplies the bounded input arena,
+allocation export, argument validation, panic handler, Reader, and the
+sapio_crypto_v1 SHA-256 import. predicate.rs is not a new registered
+evaluator and does not modify the oracle registry.
+
+Rule and encoding
+-----------------
+Parameters, committed by the program instance: exactly the 32-byte template
+hash the spending transaction must produce. No trailing bytes. The secondary
+program and the witness must both be empty.
+
+The predicate decodes the signed v1 view and recomputes the BIP-446 template
+hash: the tagged hash ("TemplateHash", per BIP340) of
+  nVersion:4 || nLockTime:4 ||
+  sha_sequences:32 || sha_outputs:32 ||
+  annex_present:1 || input_index:u32LE
+where sha_sequences is SHA256 of every input's 4-byte sequence and
+sha_outputs is SHA256 of every output's CTxOut serialization (8-byte value,
+compactSize script length, script bytes), both per BIP341. The v1 view
+carries no annex, so this emulates the common annex-absent case
+(annex_present = 0). An input index outside the input count, a malformed
+view, or trailing view bytes reject. Acceptance requires the recomputed
+hash to equal the committed parameters exactly.
+
+Following BIP-446's own rationale, the commitment deliberately excludes
+prevouts, prevout scripts and amounts: the funding may be co-spent with any
+other inputs, other inputs may be rebound freely, and overfunding pays fees
+instead of stranding coins. Changing any output, sequence, version or
+locktime rejects.
+
+Build and byte verification
+---------------------------
+Run from the repository root, using the pinned Nix development shell:
+  nix develop --no-update-lock-file -c bash examples/templatehash/build.sh --check
+The build uses rustc 1.98.1 from PATH with the same cdylib/no_std flags as
+the vault example (crate name sapio_templatehash_predicate, opt-level=z,
+LTO, codegen-units=1, panic=abort, strip=symbols, 65,536-byte stack, initial
+and maximum linear memory of 4,194,304 bytes). --write deliberately updates
+the artifact; --check fails on any mismatch and never updates it.
+
+Verification evidence
+---------------------
+examples/templatehash/main.rs computes the template hash client-side and
+cross-checks sha_outputs and sha_sequences against rust-bitcoin's own BIP341
+sighash assembly, including on a transaction from the official BIP-446
+basics.json test vectors. Against the real oracle it passes: exact template
+match signed (own and test-vector transactions), rejection of a wrong
+committed hash, rejection of one-satoshi/output-script/sequence/locktime/
+version mutations, and acceptance of a rebound other input with the
+identical template. The same 12 scenarios pass against the live signet
+enclave with the attestation-verified identity.
+
+Recorded artifact:
+  Size: 2,173 bytes
+  SHA-256: 0fbc4e2cc68722474e3a708ffb934c0784990806ea1fb4a3dda64805fdd340a1
+This is a file digest, not the ProgramInstance ID or derived funding key.

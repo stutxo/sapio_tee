@@ -64,6 +64,18 @@ The two accepted transactions are alternatives spending the **same funding outpu
 
 The example also exercises authenticated script-path signing, a nonzero selected input, inline CTV, a WASM v2 lock-time predicate, traps, fuel exhaustion, and successful signing after rejected requests. Run it with the two-terminal quick start above; it prints a `PASS` line for each observed behavior and exits nonzero on failure. Funding is synthetic: nothing is broadcast and no AWS credentials are needed for local mode.
 
+### Example: BIP-446 OP_TEMPLATEHASH emulation
+
+[`examples/templatehash`](examples/templatehash) emulates the proposed
+`OP_TEMPLATEHASH` soft-fork opcode with an inline v1 predicate: the committed
+program is a 32-byte template hash, and the oracle signs only the exact
+transaction that reproduces it (sequences and outputs committed; prevouts
+deliberately free, so other inputs may be rebound). The client example
+cross-checks its hash assembly against rust-bitcoin's own BIP341 sighash —
+including on a transaction from the official BIP-446 test vectors — then
+exercises acceptance, every committed-field mutation, and rebind acceptance
+against the live oracle. See [provenance and encoding](examples/templatehash/PROVENANCE.txt).
+
 ### Example: a source-built withdrawal vault
 
 The [`vault` example](examples/vault/main.rs) shows the full path from a Rust

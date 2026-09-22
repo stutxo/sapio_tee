@@ -1,5 +1,14 @@
 Unreleased
 
+- Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
+  that recomputes the BIP-446 template hash (nVersion, nLockTime,
+  sha_sequences, sha_outputs, annex flag, input index) and lets the oracle
+  sign only the matching transaction. The client cross-checks hash assembly
+  against rust-bitcoin's own BIP341 sighash, signs an official BIP-446
+  test-vector transaction, rejects every committed-field mutation, and signs
+  a rebound other input; all 12 scenarios pass against the live signet
+  enclave.
+
 - Move Terraform state to a remote S3 backend: a dedicated versioned,
   encrypted, public-access-blocked bucket with the native S3 lockfile,
   migrated with init -migrate-state -force-copy. The recovery record

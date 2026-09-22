@@ -27,6 +27,8 @@ jobs:
         run: nix develop --no-update-lock-file -c python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Reproduce the inline vault evaluator
         run: nix develop --no-update-lock-file -c bash examples/vault/build.sh --check
+      - name: Reproduce the template-hash predicate
+        run: nix develop --no-update-lock-file -c bash examples/templatehash/build.sh --check
       - name: Exercise the live program signing protocol
         run: |
           nix develop --no-update-lock-file -c cargo build --locked --features local-dev --bin sapio-tee --example program_oracle --example vault

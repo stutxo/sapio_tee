@@ -1,3 +1,37 @@
+SOFTWARE VERIFICATION: BIP-446 TEMPLATE-HASH EMULATION
+
+Scope:
+- examples/templatehash: a new inline v1 predicate emulating BIP-446
+  OP_TEMPLATEHASH, plus its client driver and build/provenance records.
+  No production source, evaluator registry or deployment change.
+
+Commands and scenarios exercised:
+- examples/templatehash/build.sh --write and --check with the pinned Nix
+  toolchain: the artifact builds reproducibly (2,173 bytes, sha256
+  0fbc4e2cc68722474e3a708ffb934c0784990806ea1fb4a3dda64805fdd340a1).
+- cargo check --locked --example templatehash: clean.
+- The client computes the template hash per BIP-446 and cross-checks
+  sha_outputs/sha_sequences against rust-bitcoin's own BIP341 sighash
+  assembly (SighashCache) on the fixture transaction and on the official
+  BIP-446 basics.json test-vector transaction. This cross-check caught a
+  real bug during development: TapSighashType::All is the explicit 0x01
+  sighash byte, not the 0x00 default.
+- Against the local-dev oracle and then the live signet enclave (address
+  13.216.90.100:8367, attestation-verified identity): all 12 scenarios
+  PASS: exact template match signed (own transaction and the Core-produced
+  test-vector transaction), wrong committed hash rejected, one-satoshi/
+  output-script/sequence/locktime/version mutations rejected, and a rebound
+  other input (prevout change) accepted with the identical template — the
+  BIP-446 rebindability property.
+- Funding remains synthetic; nothing is broadcast and no value moved.
+
+Limitations:
+- The v1 view carries no annex, so the emulation covers the annex-absent
+  case (annex_present = 0) only; annex-based BIP-446 usages are out of
+  scope for this predicate.
+- The test vectors were used as transaction fixtures; the vector suite's
+  script-assets file was not exercised.
+
 LIVE VERIFICATION: PUBLIC TEST-ORACLE EXPOSURE (SIGNET)
 
 Scope:
