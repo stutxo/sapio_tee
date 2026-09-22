@@ -256,19 +256,19 @@ impl<P: GroupParams> GroupElement for G<P> {
         let b = self.y.squared();
         let c = b.squared();
         let mut d = (self.x + b).squared() - a - c;
-        d = d + d;
-        let e = a + a + a;
+        d = d.doubled();
+        let e = a.doubled() + a;
         let f = e.squared();
-        let x3 = f - (d + d);
-        let mut eight_c = c + c;
-        eight_c = eight_c + eight_c;
-        eight_c = eight_c + eight_c;
+        let x3 = f - (d.doubled());
+        let mut eight_c = c.doubled();
+        eight_c = eight_c.doubled();
+        eight_c = eight_c.doubled();
         let y1z1 = self.y * self.z;
 
         G {
             x: x3,
             y: e * (d - x3) - eight_c,
-            z: y1z1 + y1z1,
+            z: y1z1.doubled(),
         }
     }
 }
@@ -321,16 +321,16 @@ impl<P: GroupParams> Add<G<P>> for G<P> {
         } else {
             let h = u2 - u1;
             let s2_minus_s1 = s2 - s1;
-            let i = (h + h).squared();
+            let i = (h.doubled()).squared();
             let j = h * i;
-            let r = s2_minus_s1 + s2_minus_s1;
+            let r = s2_minus_s1.doubled();
             let v = u1 * i;
             let s1_j = s1 * j;
-            let x3 = r.squared() - j - (v + v);
+            let x3 = r.squared() - j - (v.doubled());
 
             G {
                 x: x3,
-                y: r * (v - x3) - (s1_j + s1_j),
+                y: r * (v - x3) - (s1_j.doubled()),
                 z: ((self.z + other.z).squared() - z1_squared - z2_squared) * h,
             }
         }
@@ -896,7 +896,7 @@ impl G2 {
         let g = e.squared();
         let h = d * f;
         let i = self.x * f;
-        let j = self.z * g + h - (i + i);
+        let j = self.z * g + h - (i.doubled());
 
         self.x = d * j;
         self.y = e * (i - j) - h * self.y;
@@ -913,9 +913,9 @@ impl G2 {
         let a = (self.x * self.y).halved();
         let b = self.y.squared();
         let c = self.z.squared();
-        let d = c + c + c;
+        let d = c.doubled() + c;
         let e = G2Params::coeff_b() * d;
-        let f = e + e + e;
+        let f = e.doubled() + e;
         let g = (b + f).halved();
         let h = (self.y + self.z).squared() - (b + c);
         let i = e - b;
@@ -923,13 +923,13 @@ impl G2 {
         let e_sq = e.squared();
 
         self.x = a * (b - f);
-        self.y = g.squared() - (e_sq + e_sq + e_sq);
+        self.y = g.squared() - (e_sq.doubled() + e_sq);
         self.z = b * h;
 
         EllCoeffs {
             ell_0: i.mul_by_nonresidue(),
             ell_vw: h.neg(),
-            ell_vv: j + j + j,
+            ell_vv: j.doubled() + j,
         }
     }
 }
