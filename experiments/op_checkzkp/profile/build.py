@@ -295,13 +295,17 @@ def main():
 
     original_lock = tomllib.loads(inputs[lock_path].decode())
     locked_bn = one_package(original_lock["package"], "substrate-bn", "0.6.0")
-    require(locked_bn.get("checksum") == BN_CHECKSUM, "Pinned substrate-bn checksum drift")
+    require(locked_bn.get("source") is None, "Expected the tracked experimental substrate-bn fork")
     original = metadata(manifest_path, environment)
     bn = one_package(original["packages"], "substrate-bn", "0.6.0")
     guest = one_package(original["packages"], "checkzkp-guest", "0.1.0")
     require(package_key(bn) == package_key(locked_bn), "Metadata did not resolve the locked substrate-bn package")
     require(Path(guest["manifest_path"]).resolve() == guest_manifest, "Unexpected baseline guest package")
     bn_directory = Path(bn["manifest_path"]).resolve().parent
+    require(bn_directory == EXPERIMENT / "vendor/substrate-bn", "Unexpected BN source directory")
+    provenance = tomllib.loads((bn_directory / "Cargo.toml").read_text())
+    require(provenance["package"]["metadata"]["upstream"]["registry-checksum"] == BN_CHECKSUM,
+            "Vendored substrate-bn upstream provenance drift")
     groups = bn_directory / "src/groups/mod.rs"
     # Validate anchors before replacing any generated workspace from a prior run.
     generated_guest = instrument_guest(inputs[guest_source_path].decode())

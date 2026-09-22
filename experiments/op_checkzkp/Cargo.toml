@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["guest", "prover", "probe"]
+members = ["guest", "prover", "probe", "vendor/substrate-bn"]
 default-members = ["probe"]
 
 [patch.crates-io]
+substrate-bn = { path = "vendor/substrate-bn" }
 bitcoin = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
 bitcoin_hashes = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
 miniscript = { git = "https://github.com/sapio-lang/rust-miniscript", rev = "8d2aa4a60979a55f6ecd6222d48f94a482f4a2f6" }
