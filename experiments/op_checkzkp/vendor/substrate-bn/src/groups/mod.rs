@@ -922,8 +922,7 @@ impl G2 {
         let a = (self.x * self.y).halved();
         let b = self.y.squared();
         let c = self.z.squared();
-        let d = c.doubled() + c;
-        let e = G2Params::coeff_b() * d;
+        let e = c.mul_by_three_twist_b();
         let f = e.doubled() + e;
         let g = (b + f).halved();
         let h = (self.y + self.z).squared() - (b + c);
