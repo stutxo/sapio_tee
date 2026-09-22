@@ -227,118 +227,34 @@ fn fq12_test_vector() {
 }
 
 #[test]
-fn test_cyclotomic_exp() {
-    let orig = Fq12::new(
-        Fq6::new(
+fn cyclotomic_seed_chain_matches_ordinary_powering() {
+    // Signed exponents require cyclotomic inputs. Project deterministic public
+    // field samples with the easy exponent, and include the identity boundary.
+    // The reference uses ordinary squaring and inversion, not cyclotomic formulas.
+    for index in 0..16u64 {
+        let coordinate = |offset| {
+            let value = index * 12 + offset;
             Fq2::new(
-                Fq::from_str(
-                    "2259924035228092997691937637688451143058635253053054071159756458902878894295",
-                ).unwrap(),
-                Fq::from_str(
-                    "13145690032701362144460254305183927872683620413225364127064863863535255135244",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "9910063591662383599552477067956819406417086889312288278252482503717089428441",
-                ).unwrap(),
-                Fq::from_str(
-                    "537414042055419261990282459138081732565514913399498746664966841152381183961",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "15311812409497308894370893420777496684951030254049554818293571309705780605004",
-                ).unwrap(),
-                Fq::from_str(
-                    "13657107176064455789881282546557276003626320193974643644160350907227082365810",
-                ).unwrap(),
-            ),
-        ),
-        Fq6::new(
-            Fq2::new(
-                Fq::from_str(
-                    "4913017949003742946864670837361832856526234260447029873580022776602534856819",
-                ).unwrap(),
-                Fq::from_str(
-                    "7834351480852267338070670220119081676575418514182895774094743209915633114041",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "12837298223308203788092748646758194441270207338661891973231184407371206766993",
-                ).unwrap(),
-                Fq::from_str(
-                    "12756474445699147370503225379431475413909971718057034061593007812727141391799",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "9473802207170192255373153510655867502408045964296373712891954747252332944018",
-                ).unwrap(),
-                Fq::from_str(
-                    "4583089109360519374075173304035813179013579459429335467869926761027310749713",
-                ).unwrap(),
-            ),
-        ),
-    );
-
-    let expected = Fq12::new(
-        Fq6::new(
-            Fq2::new(
-                Fq::from_str(
-                    "14722956046055152398903846391223329501345567382234608299399030576415080188350",
-                ).unwrap(),
-                Fq::from_str(
-                    "14280703280777926697010730619606819467080027543707671882210769811674790473417",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "19969875076083990244184003223190771301761436396530543002586073549972410735411",
-                ).unwrap(),
-                Fq::from_str(
-                    "10717335566913889643303549252432531178405520196706173198634734518494041323243",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "6063612626166484870786832843320782567259894784043383626084549455432890717937",
-                ).unwrap(),
-                Fq::from_str(
-                    "17089783040131779205038789608891431427943860868115199598200376195935079808729",
-                ).unwrap(),
-            ),
-        ),
-        Fq6::new(
-            Fq2::new(
-                Fq::from_str(
-                    "10029863438921507421569931792104023129735006154272482043027653425575205672906",
-                ).unwrap(),
-                Fq::from_str(
-                    "6406252222753462799887280578845937185621081001436094637606245493619821542775",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "1048245462913506652602966692378792381004227332967846949234978073448561848050",
-                ).unwrap(),
-                Fq::from_str(
-                    "1444281375189053827455518242624554285012408033699861764136810522738182087554",
-                ).unwrap(),
-            ),
-            Fq2::new(
-                Fq::from_str(
-                    "8839610992666735109106629514135300820412539620261852250193684883379364789120",
-                ).unwrap(),
-                Fq::from_str(
-                    "11347360242067273846784836674906058940820632082713814508736182487171407730718",
-                ).unwrap(),
-            ),
-        ),
-    );
-
-    let e = orig.exp_by_neg_z();
-
-    assert_eq!(e, expected);
+                Fq::new(U256::from(value)).unwrap(),
+                Fq::new(U256::from(value * value + 1)).unwrap(),
+            )
+        };
+        let sample = Fq12::new(
+            Fq6::new(coordinate(1), coordinate(3), coordinate(5)),
+            Fq6::new(coordinate(7), coordinate(9), coordinate(11)),
+        );
+        let easy = sample.unitary_inverse() * sample.inverse().unwrap();
+        let cyclotomic = if index == 0 {
+            Fq12::one()
+        } else {
+            easy.frobenius_map(2) * easy
+        };
+        assert_eq!(cyclotomic * cyclotomic.unitary_inverse(), Fq12::one());
+        assert_eq!(cyclotomic.cyclotomic_squared(), cyclotomic.squared());
+        let expected = cyclotomic
+            .pow(U256::from(4965661367192848881u64))
+            .inverse()
+            .unwrap();
+        assert_eq!(cyclotomic.exp_by_neg_z(), expected);
+    }
 }

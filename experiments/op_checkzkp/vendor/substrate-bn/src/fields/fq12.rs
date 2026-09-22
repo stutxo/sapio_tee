@@ -152,8 +152,34 @@ impl Fq12 {
     }
 
     pub fn exp_by_neg_z(&self) -> Fq12 {
-        self.cyclotomic_pow(U256::from([4965661367192848881, 0, 0, 0]))
-            .unitary_inverse()
+        // Adapted from gnark-crypto's BN254 Expt addition/subtraction chain:
+        // https://github.com/Consensys/gnark-crypto/blob/master/ecc/bn254/internal/fptower/e12_pairing.go
+        // Copyright 2020-2026 Consensys Software Inc.; Apache-2.0 (LICENSE-APACHE).
+        // 60 cyclotomic squares, 17 multiplies, 5 conjugates for positive z.
+        // Conjugation is inversion here because the input is cyclotomic.
+        fn square_n(mut value: Fq12, count: usize) -> Fq12 {
+            for _ in 0..count {
+                value = value.cyclotomic_squared();
+            }
+            value
+        }
+        let x2 = self.cyclotomic_squared();
+        let x3 = *self * x2;
+        let x5 = x2 * x3;
+        let x7 = x2 * x5;
+        let mut result = square_n(*self * x7, 3) * x5;
+        result = square_n(result, 5) * x3.unitary_inverse();
+        result = square_n(result, 4) * x3;
+        result = square_n(result, 5) * x5;
+        result = square_n(result, 4) * x5.unitary_inverse();
+        result = square_n(result, 4) * x3.unitary_inverse();
+        result = square_n(result, 4) * *self;
+        result = square_n(result, 5) * x5;
+        result = square_n(result, 5) * x7;
+        result = square_n(result, 4) * x7.unitary_inverse();
+        result = square_n(result, 7) * x5;
+        result = square_n(result, 5) * self.unitary_inverse();
+        (square_n(result, 4) * *self).unitary_inverse()
     }
 
     pub fn unitary_inverse(&self) -> Fq12 {
@@ -279,24 +305,6 @@ impl Fq12 {
         }
     }
 
-    pub fn cyclotomic_pow<I: Into<U256>>(&self, by: I) -> Self {
-        let mut res = Self::one();
-
-        let mut found_one = false;
-
-        for i in by.into().bits() {
-            if found_one {
-                res = res.cyclotomic_squared();
-            }
-
-            if i {
-                found_one = true;
-                res = *self * res;
-            }
-        }
-
-        res
-    }
 }
 
 impl FieldElement for Fq12 {
