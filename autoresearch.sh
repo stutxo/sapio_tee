@@ -42,6 +42,10 @@ RUSTFLAGS="" CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
 # The profile builder works on ignored source copies only. Its stage results
 # include instrumentation overhead and never contribute to the primary score.
 python3 "$root/experiments/op_checkzkp/profile/build.py"
+bash "$root/experiments/op_checkzkp/optimize.sh" \
+    "$target/wasm32-unknown-unknown/release/checkzkp_guest.wasm" "$target/checkzkp_guest.scored.wasm"
+bash "$root/experiments/op_checkzkp/optimize.sh" \
+    "$target/checkzkp_guest.profile.wasm" "$target/checkzkp_guest.profile.optimized.wasm"
 exec "$target/release/checkzkp-probe" --benchmark \
-    "$target/wasm32-unknown-unknown/release/checkzkp_guest.wasm" "$corpus" \
-    --profile-module "$target/checkzkp_guest.profile.wasm"
+    "$target/checkzkp_guest.scored.wasm" "$corpus" \
+    --profile-module "$target/checkzkp_guest.profile.optimized.wasm"

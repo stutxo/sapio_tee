@@ -20,6 +20,8 @@ CARGO_PROFILE_RELEASE_OPT_LEVEL="$opt_level" \
 RUSTFLAGS="-C link-arg=-zstack-size=1048576 -C link-arg=--initial-memory=8388608 -C link-arg=--max-memory=67108864" \
     cargo build --locked --manifest-path "$manifest" -p checkzkp-guest \
     --release --target wasm32-unknown-unknown --target-dir "$target"
+bash experiments/op_checkzkp/optimize.sh \
+    "$target/wasm32-unknown-unknown/release/checkzkp_guest.wasm" "$target/checkzkp_guest.scored.wasm"
 
 # Default path enforces the actual ProgramOracle limits and validates signatures.
 # The measured BN254 verifier currently exhausts that 100M fuel budget; default
@@ -30,4 +32,4 @@ RUSTFLAGS="-C link-arg=-zstack-size=1048576 -C link-arg=--initial-memory=8388608
 # --diagnostic-fuel N explicitly bypasses module admission/changes fuel and NEVER
 # signs: diagnostic success must not be mistaken for a deployable predicate.
 exec cargo run --locked --manifest-path "$manifest" -p checkzkp-probe --release \
-    --target-dir "$target" -- "$target/wasm32-unknown-unknown/release/checkzkp_guest.wasm" "$@"
+    --target-dir "$target" -- "$target/checkzkp_guest.scored.wasm" "$@"
