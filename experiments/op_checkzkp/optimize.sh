@@ -14,4 +14,4 @@ if [[ "$("${optimizer[@]}" --version)" != "wasm-opt version 132" ]]; then
     echo "Expected pinned Binaryen 132" >&2
     exit 1
 fi
-"${optimizer[@]}" -O3 --enable-bulk-memory-opt "$1" -o "$2"
+"${optimizer[@]}" -O3 --converge --enable-bulk-memory-opt "$1" -o "$2"
