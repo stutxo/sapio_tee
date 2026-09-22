@@ -293,11 +293,13 @@ impl U256 {
 
     /// Subtract `other` from `self` (mod `modulo`)
     pub fn sub(&mut self, other: &U256, modulo: &U256) {
-        if *self < *other {
-            add_nocarry(&mut self.0, &modulo.0);
+        if sub_with_borrow(&mut self.0, &other.0) != 0 {
+            let mut carry = 0;
+            self.0[0] = adc(self.0[0], modulo.0[0], &mut carry);
+            self.0[1] = adc(self.0[1], modulo.0[1], &mut carry);
+            // The borrowed difference wrapped by R; adding p cancels that R.
+            debug_assert_eq!(carry, 1);
         }
-
-        sub_noborrow(&mut self.0, &other.0);
     }
 
     /// Multiply `self` by `other` (mod `modulo`) via the Montgomery
@@ -495,7 +497,7 @@ fn add_nocarry(a: &mut [u128; 2], b: &[u128; 2]) {
 }
 
 #[inline]
-fn sub_noborrow(a: &mut [u128; 2], b: &[u128; 2]) {
+fn sub_with_borrow(a: &mut [u128; 2], b: &[u128; 2]) -> u128 {
     #[inline]
     fn sbb(a: u128, b: u128, borrow: &mut u128) -> u128 {
         let (low, borrow0) = (a as u64).overflowing_sub(b as u64);
@@ -512,7 +514,13 @@ fn sub_noborrow(a: &mut [u128; 2], b: &[u128; 2]) {
         *a = sbb(*a, *b, &mut borrow);
     }
 
-    debug_assert!(0 == borrow);
+    borrow
+}
+
+#[inline]
+fn sub_noborrow(a: &mut [u128; 2], b: &[u128; 2]) {
+    let borrow = sub_with_borrow(a, b);
+    debug_assert_eq!(borrow, 0);
 }
 
 // TODO: Make `from_index` a const param
