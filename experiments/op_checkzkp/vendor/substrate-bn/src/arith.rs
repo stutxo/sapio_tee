@@ -545,30 +545,33 @@ fn mul_reduce(this: &mut [u128; 2], by: &[u128; 2], modulus: &[u128; 2], inv: u1
     let p = limbs(modulus);
     let inv = inv as u32 as u64;
     let mut t = [0u64; 9];
-    for digit in a {
-        let mut carry = 0;
-        unroll! {
-            for j in 0..8 {
-                let sum = t[j] + digit * b[j] + carry;
-                t[j] = sum & MASK;
-                carry = sum >> 32;
+    unroll! {
+        for i in 0..8 {
+            let digit = a[i];
+            let mut carry = 0;
+            unroll! {
+                for j in 0..8 {
+                    let sum = t[j] + digit * b[j] + carry;
+                    t[j] = sum & MASK;
+                    carry = sum >> 32;
+                }
             }
-        }
-        let top = t[8] + carry;
-        t[8] = top & MASK;
-        let high = top >> 32;
-        let k = t[0].wrapping_mul(inv) & MASK;
-        carry = (t[0] + k * p[0]) >> 32;
-        unroll! {
-            for j in 1..8 {
-                let sum = t[j] + k * p[j] + carry;
-                t[j - 1] = sum & MASK;
-                carry = sum >> 32;
+            let top = t[8] + carry;
+            t[8] = top & MASK;
+            let high = top >> 32;
+            let k = t[0].wrapping_mul(inv) & MASK;
+            carry = (t[0] + k * p[0]) >> 32;
+            unroll! {
+                for j in 1..8 {
+                    let sum = t[j] + k * p[j] + carry;
+                    t[j - 1] = sum & MASK;
+                    carry = sum >> 32;
+                }
             }
+            let top = t[8] + carry;
+            t[7] = top & MASK;
+            t[8] = high + (top >> 32);
         }
-        let top = t[8] + carry;
-        t[7] = top & MASK;
-        t[8] = high + (top >> 32);
     }
     debug_assert_eq!(t[8], 0);
     this[0] = t[0] as u128 | (t[1] as u128) << 32
