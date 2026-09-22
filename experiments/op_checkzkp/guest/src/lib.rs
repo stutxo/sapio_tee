@@ -12,7 +12,7 @@
 mod guest;
 
 use guest::{Arguments, Reader};
-use substrate_bn::{arith::U256, pairing_batch, AffineG1, AffineG2, Fq, Fq2, Fr, Gt, G1, G2};
+use substrate_bn::{arith::U256, pairing_batch, AffineG1, AffineG2, Fq, Fq2, Fr, Group, Gt, G1, G2};
 
 const DOMAIN: &[u8] = b"sapio/checkzkp/bn254/v1";
 const VK_BYTES: usize = 896;
@@ -75,7 +75,9 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
     let beta = read_g2(&mut vk)?;
     let gamma = read_g2(&mut vk)?;
     let delta = read_g2(&mut vk)?;
-    let mut ic = read_g1(&mut vk)?;
+    let ic0 = read_g1(&mut vk)?;
+    let mut terms = [(G1::zero(), 0u128); 6];
+    let mut index = 0;
     // Six public Fr values: the big-endian 128-bit halves of C, T, A.
     for digest in [
         &parameters[VK_BYTES..],
@@ -87,12 +89,15 @@ fn evaluate(arguments: Arguments<'_>) -> Option<bool> {
             scalar[16..].copy_from_slice(half);
             // Fr::from_slice reduces; Fr::new instead enforces canonical range.
             let public = Fr::new(U256::from_slice(&scalar).ok()?)?;
-            ic = ic + read_g1(&mut vk)? * public;
+            // The encoded scalar has at most 128 bits; Fr::new above is retained.
+            terms[index] = (read_g1(&mut vk)?, public.into_u256().0[0]);
+            index += 1;
         }
     }
     if !vk.is_finished() {
         return None;
     }
+    let ic = ic0 + G1::msm_128(&terms);
 
     // A computed IC accumulator may be zero; encoded points may never be infinity.
     Some(pairing_batch(&[(a, b), (-alpha, beta), (-ic, gamma), (-c, delta)]) == Gt::one())

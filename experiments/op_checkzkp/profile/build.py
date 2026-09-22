@@ -124,6 +124,7 @@ def instrument_guest(source):
         ('    let mut vk = Reader::new(&parameters[..VK_BYTES]);\n', 3, "VK decoding"),
         ('    // Six public Fr values: the big-endian 128-bit halves of C, T, A.\n', 4, "public input scalars"),
         ('    if !vk.is_finished() {\n', 3, "VK trailing bytes check"),
+        ('    let ic = ic0 + G1::msm_128(&terms);\n', 4, "interleaved public input multiplication"),
         ('    // A computed IC accumulator may be zero; encoded points may never be infinity.\n', 5, "pairing preparation"),
     ]:
         source = replace_once(source, anchor, f"    profile_phase({phase});\n" + anchor, label)
@@ -131,11 +132,11 @@ def instrument_guest(source):
     # Only separate the existing read from its multiplication; no checks change.
     return replace_once(
         source,
-        '            ic = ic + read_g1(&mut vk)? * public;\n',
+        '            terms[index] = (read_g1(&mut vk)?, public.into_u256().0[0]);\n',
         '            profile_phase(3);\n'
         '            let point = read_g1(&mut vk)?;\n'
         '            profile_phase(4);\n'
-        '            ic = ic + point * public;\n',
+        '            terms[index] = (point, public.into_u256().0[0]);\n',
         "IC decoding versus multiplication",
     )
 
