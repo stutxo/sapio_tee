@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["guest", "prover", "probe", "vendor/substrate-bn"]
+members = ["guest", "ark-guest", "generic-guest", "prover", "probe", "generic-probe", "vendor/substrate-bn"]
 default-members = ["probe"]
 
 [patch.crates-io]

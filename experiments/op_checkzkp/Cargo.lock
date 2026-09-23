@@ -531,6 +531,52 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "checkzkp-ark-guest"
+version = "0.1.0"
+dependencies = [
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-groth16",
+ "dlmalloc",
+]
+
+[[package]]
+name = "checkzkp-generic-guest"
+version = "0.1.0"
+dependencies = [
+ "ark-bn254",
+ "ark-groth16",
+ "ark-serialize",
+ "ark-std",
+ "dlmalloc",
+]
+
+[[package]]
+name = "checkzkp-generic-probe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-groth16",
+ "ark-relations",
+ "ark-serialize",
+ "checkzkp-generic-guest",
+ "ctv_emulators",
+ "hex",
+ "rand",
+ "sapio-base",
+ "sapio-wasm",
+ "serde",
+ "serde_json",
+ "sha2",
+ "wasmer",
+ "wasmer-middlewares",
+]
+
+[[package]]
 name = "checkzkp-guest"
 version = "0.1.0"
 dependencies = [
@@ -544,6 +590,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "checkzkp-ark-guest",
  "checkzkp-prover",
  "ctv_emulators",
  "hex",

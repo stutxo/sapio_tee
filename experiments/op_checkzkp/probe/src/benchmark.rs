@@ -1,4 +1,4 @@
-use crate::prepared::{prepare_parameters, PREPARED_PARAMETERS_BYTES};
+use crate::backend::Backend;
 use crate::runtime::{
     validate_inputs, Admission, Measurement, MeteredGuest, DIAGNOSTIC_FUEL, PHASE_NAMES,
 };
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 // Harness input-file bounds, not changes to any production resource limit.
 const MAX_CORPUS_BYTES: usize = 64 * 1024 * 1024;
-const MAX_PROFILE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_DIAGNOSTIC_MODULE_BYTES: usize = 4 * 1024 * 1024;
 
 fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
@@ -65,11 +65,12 @@ fn validate_corpus(corpus: &Corpus) -> Result<&Fixture> {
     ensure!(rejects > 0, "corpus has no full-path rejection");
     ensure!(malformed > 0, "corpus has no malformed input");
     let valid = valid.context("corpus has no accepted fixture")?;
-    // Parsing and pairing here are independent arkworks code, not the guest's
-    // substrate-bn implementation. Labels alone never establish correctness.
+    // The raw-key native arkworks reference checks every label. Its arithmetic
+    // is independent from substrate-bn, but shared with the arkworks guest.
     for fixture in &corpus.cases {
-        fixtures::verify_fixture(fixture)
-            .with_context(|| format!("independent reference disagreed for {:?}", fixture.name))?;
+        fixtures::verify_fixture(fixture).with_context(|| {
+            format!("native arkworks reference disagreed for {:?}", fixture.name)
+        })?;
     }
     Ok(valid)
 }
@@ -128,8 +129,33 @@ pub fn generate(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) -> Result<()> {
-    let module = read_bounded(module_path, MAX_PROGRAM_BYTES)?;
+pub fn run(
+    module_path: &Path,
+    corpus_path: &Path,
+    profile_path: Option<&Path>,
+    backend: Backend,
+    legacy_diagnostic: bool,
+) -> Result<()> {
+    ensure!(
+        backend == Backend::Substrate || profile_path.is_none(),
+        "--profile-module is supported only for the substrate backend"
+    );
+    let (admission, module_bound, admission_name) = if legacy_diagnostic {
+        (
+            Admission::LegacyDiagnostic,
+            MAX_DIAGNOSTIC_MODULE_BYTES,
+            "legacy-diagnostic",
+        )
+    } else {
+        (Admission::Scored, MAX_PROGRAM_BYTES, "scored")
+    };
+    println!("ASI backend={}", backend.name());
+    println!("ASI admission={admission_name}");
+    println!("Reference: {}", backend.reference_description());
+    if legacy_diagnostic {
+        println!("EXPLICIT LEGACY DIAGNOSTIC: module byte cap bypassed only; harness module bound={MAX_DIAGNOSTIC_MODULE_BYTES}; all other admission/input limits unchanged; no signing; not evidence of deployability");
+    }
+    let module = read_bounded(module_path, module_bound)?;
     let corpus_bytes = read_bounded(corpus_path, MAX_CORPUS_BYTES)?;
     let corpus: Corpus =
         serde_json::from_slice(&corpus_bytes).context("decoding strict public corpus")?;
@@ -140,7 +166,7 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
         hex::encode(Sha256::digest(&corpus_bytes))
     );
     println!("DIAGNOSTIC BENCHMARK ONLY: allowance={DIAGNOSTIC_FUEL}; production fuel={INSTANCE_FUEL}; no signing; no deployability claim");
-    let guest = MeteredGuest::new(&module, DIAGNOSTIC_FUEL, Admission::Scored)?;
+    let guest = MeteredGuest::new(&module, DIAGNOSTIC_FUEL, admission)?;
     let mut verification_fuel = 0u64;
     let mut linear_memory_bytes = 0u64;
     let mut verification_time = Duration::ZERO;
@@ -150,11 +176,11 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     let mut full_cases = 0usize;
     let mut valid_parameters = None;
     for fixture in &corpus.cases {
-        // The unchanged raw corpus has already passed the independent arkworks
+        // The unchanged raw corpus has already passed the native arkworks
         // reference. Preparation is deterministic, fixed-key-only work outside
         // guest metering; the guest still meters all prepared-byte decoding.
         let started = Instant::now();
-        let prepared = prepare_parameters(&fixture.parameters);
+        let prepared = backend.prepare_parameters(&fixture.parameters);
         preparation_time += started.elapsed();
         let parameters = match prepared {
             Ok(parameters) => parameters,
@@ -210,7 +236,7 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     );
     let valid_parameters = valid_parameters.context("first accepted fixture was not evaluated")?;
     // Use another fresh instance, not a retained post-rejection store.
-    fixtures::verify_fixture(valid).context("independent reference replay")?;
+    fixtures::verify_fixture(valid).context("native arkworks reference replay")?;
     let replay = guest
         .measure(&valid_parameters, &valid.view, &valid.witness)
         .context("valid fixture replay after rejected fixtures")?;
@@ -220,7 +246,7 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     linear_memory_bytes = linear_memory_bytes.max(replay.memory_bytes);
 
     let profile = if let Some(path) = profile_path {
-        let bytes = read_bounded(path, MAX_PROFILE_BYTES)?;
+        let bytes = read_bounded(path, MAX_DIAGNOSTIC_MODULE_BYTES)?;
         println!(
             "ASI profile_module_sha256={}",
             hex::encode(Sha256::digest(&bytes))
@@ -260,7 +286,10 @@ pub fn run(module_path: &Path, corpus_path: &Path, profile_path: Option<&Path>) 
     }
     println!("METRIC module_bytes={}", module.len());
     println!("METRIC linear_memory_bytes={linear_memory_bytes}");
-    println!("METRIC prepared_parameters_bytes={PREPARED_PARAMETERS_BYTES}");
+    println!(
+        "METRIC prepared_parameters_bytes={}",
+        valid_parameters.len()
+    );
     println!("METRIC preparation_rejections={preparation_rejections}");
     println!("METRIC guest_cases={guest_cases}");
     println!("METRIC full_cases={full_cases}");

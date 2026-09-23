@@ -119,6 +119,95 @@ update an already funded contract. See [provenance and encoding](examples/vault/
 CI checks the exact WASM bytes and runs both signing examples. This inline
 program needs no registry change or enclave redeployment.
 
+### Experiment: generic Groth16 proof core
+
+[`generic-guest`](experiments/op_checkzkp/generic-guest/src/lib.rs) is a reusable
+BN254 Groth16 verifier using unchanged arkworks 0.5 arithmetic. Its native/rlib
+API is `verify(verifying_key, proof, public_inputs) -> Result<bool, VerifyError>`.
+It has **no built-in SHA-secret relation, transaction digest, or authorization
+policy**. The calling application must authenticate/commit the reviewed verifier
+and verification key, select the intended circuit/setup, and derive the correct
+transaction-bound public inputs. Proof validity alone is not permission to sign.
+
+Arguments are exact arkworks 0.5 `CanonicalSerialize` **uncompressed** encodings
+of `VerifyingKey<Bn254>`, `Proof<Bn254>`, and `Vec<Fr>`. Each buffer is bounded by
+65,536 bytes. Counts are checked against actual payload lengths before any
+vector allocation; decoding rejects trailing bytes, noncanonical scalars, and
+invalid curve/subgroup points. A streaming canonical-serialization comparison
+also rejects point sign/infinity aliases that `Deserialize` alone accepts.
+Canonical identity points remain valid, including identity IC coefficients.
+Public scalars use the full field, not the demo's 128-bit digest halves.
+
+For `n` public inputs, the key is `520 + 64*n` bytes, the proof is 256 bytes,
+and the input vector is `8 + 32*n` bytes, with upstream little-endian `u64`
+sequence lengths. Zero public inputs still require the eight-byte zero count
+and one IC point. The key byte cap permits at most 1,015 inputs; this is a
+serialization bound, **not** a promise that every such key fits a fuel budget.
+This is not a `G16M`, `G16A`, or `G16L` prepared-key format.
+
+The WASM exports only `memory`, `groth16_alloc_v1(len) -> ptr`, and
+`groth16_verify_v1(vk_ptr, vk_len, proof_ptr, proof_len, inputs_ptr, inputs_len)`.
+Pointers/lengths are `u32`; verification returns 1 for valid, 0 for a false
+equation, and -1 for malformed input/verifier error. Allocation failure, traps,
+and fuel exhaustion are execution errors, never proof rejections. There are
+no imports, start function, or `sapio_*` signing entrypoints.
+
+With the pinned dependencies cached:
+
+```sh
+bash experiments/op_checkzkp/build-generic.sh
+experiments/op_checkzkp/target/release/checkzkp-generic-probe --benchmark \
+  experiments/op_checkzkp/target/generic-comparison/groth16.wasm \
+  experiments/op_checkzkp/fixtures/generic-corpus.json \
+  --legacy-diagnostic --diagnostic-fuel 1000000000
+```
+
+The checked-in [public corpus](experiments/op_checkzkp/fixtures/generic-corpus.json)
+and [measured results](experiments/op_checkzkp/fixtures/generic-results.json)
+preserve the exact benchmark below; no fresh setup is needed to replay it.
+
+`--generate-corpus PATH` creates additional public fixtures without overwriting
+existing files. Fixtures use real official setup/proving for 0/1/6/32-input
+algebraic workloads, not an authorization policy;
+no proving keys or secrets are written. Unused R1CS inputs retain the official
+reduction. Separately named, algebraically constructed identity-IC fixtures
+test verifier semantics without claiming a production setup. Native checking
+uses the **same arithmetic library**, not an independent cryptographic reference.
+For external proofs, `--verify MODULE VK_FILE PROOF_FILE PUBLIC_INPUTS_FILE`
+takes raw binary files and executes WASM directly; use the same diagnostic flags
+for this oversized artifact. False/malformed results exit unsuccessfully.
+
+**Cold-path measurement:** every fresh WASM call performs canonical decoding,
+key/point validation, key preparation, MSM, and official Groth16 verification.
+There are no native prepared tables, folded application constants, or cached-key
+discounts. The optimized module is **107,252 bytes**; observed linear memory is
+8 MiB, with a declared 64 MiB maximum and a bounded 4 MiB heap.
+
+| Valid workload | Public inputs | Measured full-path fuel |
+| --- | ---: | ---: |
+| Algebraic relation | 0 | 165,301,843 |
+| Constrained full-field scalar | 1 | 168,010,746 |
+| Algebraic relation | 6 | 198,621,592 |
+| Algebraic relation | 32 | 339,724,827 |
+
+All **37 cases** (13 full verifications, 24 malformed inputs) and **28 valid
+replays** pass with the explicit 1B diagnostic allowance. The largest full-case
+cost is **339,768,557 fuel**, including false proofs. A separate maximum-size
+identity-IC key (65,480 bytes, 1,015 inputs) also verifies at 8 MiB; that algebraic
+boundary check is not worst-case arithmetic. Direct ABI checks cover pointer,
+allocation, replay, and input-length boundaries.
+Module SHA256: `600bef7179f2cf8b5ad6f4faa2ab86db8213c568d0ad8fc0240b3c7692a97c6f`.
+Corpus SHA256: `52a12bb5a5015da9e0567badca6ce58b498f2cbeb2363ce0de3961e20c8dd75c`.
+Fuel values describe this public sample, not a universal bound or Nitro timing.
+
+**This cold generic implementation exceeds both current production limits.**
+The actual pinned Sapio evaluator rejects its size; all full corpus cases
+exhaust the unchanged 100M allowance when only size admission is waived.
+The prepared SHA-demo's code-size-only admission issue below does not apply to
+this interface. No limits changed, no generic oracle signature was requested,
+and no funds were used. The original frozen corpus/control remains unchanged
+at 63,683 bytes and 65,786,641 maximum fuel.
+
 ### Experiment: pure-WASM Groth16 authorization
 
 [`experiments/op_checkzkp`](experiments/op_checkzkp) verifies a BN254 Groth16
@@ -126,7 +215,11 @@ proof of knowledge of a 32-byte secret `s`, with `C = SHA256(s)` and
 `A = SHA256(s || T)`. The guest recomputes
 `T = SHA256("sapio/checkzkp/bn254/v1" || SHA256(encoded_signed_view))`.
 Only the existing SHA256 host import is used; proof validation and all per-spend
-ZKP arithmetic execute in WASM. The independent reference remains arkworks.
+ZKP arithmetic execute in WASM. The retained `substrate-bn` backend has an
+independent arkworks reference.
+These SHA-secret application backends remain comparison controls, not generic
+verifier resource measurements; they prepare the key and fold the fixed
+commitment before metered verification.
 
 From the repository root, with the pinned dependencies already cached:
 
@@ -150,7 +243,7 @@ unchanged 65,536-byte cap; parameters are 34,149 bytes, the witness is 288 bytes
 and linear memory is 8 MiB against the unchanged 64 MiB cap. Fresh synthetic
 requests also pass the actual production signing and response-validation gate.
 
-**Preparation is a security boundary.** The sole producer in
+**Preparation is a security boundary.** The retained backend's producer in
 [`probe/src/prepared.rs`](experiments/op_checkzkp/probe/src/prepared.rs) validates
 every original key point before computing the constant pairing, fixed G2 lines,
 and fixed commitment contribution. Canonical prepared decoding does not
@@ -174,6 +267,118 @@ valid replay in a fresh instance.
 The corpus maximum is not a universal worst-case bound. This remains an
 experimental single-party setup, not audited custody software or a Nitro
 performance measurement; never fund its disposable keys.
+
+#### Arkworks backend comparison
+
+```sh
+bash experiments/op_checkzkp/compare-arkworks.sh
+```
+
+This separately builds `ark-groth16` / `ark-bn254` 0.5.0 in pure WASM, using
+the same pinned compiler, Binaryen pass, frozen corpus, fixed-key preparation
+and commitment folding. The standard variant calls the official Groth16
+verifier; the `msm` variant uses arkworks' variable-base MSM before its verifier.
+Neither changes the relation or production limits. Outputs and full logs are
+under `experiments/op_checkzkp/target/arkworks-comparison/`; the retained scored
+artifact and autoresearch history are not overwritten.
+
+| Backend | Frozen full-path maximum fuel | Module bytes | Production admission |
+| --- | ---: | ---: | --- |
+| Retained `substrate-bn` | 65,786,641 | 63,683 | Pass, including actual signing |
+| Arkworks standard | 88,371,004 | 91,610 | Reject: module exceeds 65,536 bytes |
+| Arkworks MSM | 85,616,636 | 96,372 | Reject: module exceeds 65,536 bytes |
+
+All three pass the same 43 corpus outcomes and valid replay. Arkworks consumes
+34.3% more fuel, or 30.1% more with MSM, in this configuration. Its `G16A`
+parameters are 34,597 bytes: the extra 448 bytes retain real fixed VK metadata
+for the official API. The validated producer is in
+[`ark-guest/src/lib.rs`](experiments/op_checkzkp/ark-guest/src/lib.rs).
+Prepared tables use arkworks' own coefficient ordering and are not `G16M`.
+Native arkworks is not an independent arithmetic reference for arkworks WASM;
+the retained substrate backend supplies the cross-backend comparison.
+
+The runner explicitly enables `--backend arkworks --legacy-diagnostic` to
+measure oversized modules; this is not production admission or permission to
+sign. Fresh production invocations without diagnostic flags were rejected by
+the actual evaluator's byte cap. Fresh diagnostic proofs also passed with
+100,000,000 fuel, but no arkworks oracle signatures were requested. The corpus
+maximum remains a sample, not a universal bound; the retained backend remains
+a frozen, resource-compliant comparison control, not a custody recommendation.
+
+#### Upstream-only MCL comparison
+
+[`build-mcl.sh`](experiments/op_checkzkp/build-mcl.sh) pins MCL v4.10 at
+`cbb18eb08b86129cf936a6436b5e6c68a2ce8ddf`, verifies the source archive SHA256,
+and builds unchanged upstream arithmetic for `BN_SNARK1` with
+`MCL_FP_BIT=256` / `MCL_FR_BIT=256`. The small adapter owns only the ABI,
+canonical codecs, validation, transaction binding and ordinary Groth16 equation.
+No fork arithmetic, production limits, funded outputs or autoresearch artifacts
+are changed.
+
+```sh
+# Explicit source download; subsequent builds are offline.
+bash experiments/op_checkzkp/build-mcl.sh fetch
+bash experiments/op_checkzkp/build-mcl.sh build Oz cpp
+nix develop --offline --no-update-lock-file --command \
+  env CARGO_NET_OFFLINE=true CARGO_INCREMENTAL=0 RUSTFLAGS= \
+  cargo build --offline --locked --manifest-path experiments/op_checkzkp/Cargo.toml \
+  -p checkzkp-probe --release --target-dir experiments/op_checkzkp/target
+experiments/op_checkzkp/target/release/checkzkp-probe --benchmark \
+  experiments/op_checkzkp/target/mcl-comparison/mcl.wasm \
+  experiments/op_checkzkp/fixtures/corpus.json --backend mcl --legacy-diagnostic
+```
+
+The builder accepts `Oz|Os` and `cpp|llvm`; `llvm` selects upstream's existing
+`MCL_USE_LLVM=1`, `base32.ll` and `bint32.ll`, without generating or editing
+arithmetic. Both use standalone C++03, clang 21.1.8, bundled rust-lld 22.1.8,
+LTO and Binaryen 132. Outputs, including the native `prepare` executable and
+upstream copyright notice, stay under `target/mcl-comparison/`. The default
+`cpp -Oz` module rebuilt byte-identically after a fresh verified source download.
+
+| MCL configuration | Frozen full-path maximum fuel | Module bytes |
+| --- | ---: | ---: |
+| C++ `-Oz` (default, smallest) | 504,466,761 | 137,850 |
+| C++ `-Os` | 454,012,024 | 152,156 |
+| Upstream LLVM `-Oz` | 460,487,877 | 188,502 |
+| Upstream LLVM `-Os` (fastest) | 422,534,289 | 199,610 |
+
+All four pass all 43 frozen outcomes and fresh-instance replay against the
+independent native arkworks reference: 14 malformed source keys are rejected
+during preparation, while 29 cases, including all 14 full paths, reach WASM.
+Each also passes 32 direct ABI/codec smoke checks. The default additionally
+passes two auxiliary valid algebraic cases covering folded/final IC infinity;
+these do not change the frozen corpus. Original source/proof infinity remains
+forbidden, and G2 subgroup checks remain enabled.
+
+`G16L` parameters are 34,153 bytes: tag, little-endian coefficient count (87),
+MCL's canonical Fp12 target and Fp6 gamma/delta line serializations, tagged folded
+IC, four ordinary affine IC bases, and commitment. The native 64-bit producer
+and WASM 32-bit consumer do not share internal limbs or reinterpret `G16M`/`G16A`.
+All original VK points are validated before folding. As with the other prepared
+formats, canonical decoding does not authenticate tables against a VK: validated
+preparation and setup must precede funding commitment. Witnesses remain 288 bytes.
+
+Every build uses 8 MiB observed linear memory with a configured 64 MiB ceiling,
+has no start section, and exports only memory and the two guest entrypoints.
+Its sole import is `sapio_crypto_v1::sha256`; initialization and all spend-time
+group/pairing arithmetic are metered inside WASM. The corpus measurements use
+the explicitly diagnostic 1,000,000,000-fuel allowance, not the production cap.
+Actual production admission rejects the default module at 65,536 bytes.
+A fresh 100,000,000-fuel diagnostic exhausts its allowance; a fresh
+1,000,000,000-fuel diagnostic passes valid proof, invalid proof, changed
+transaction, malformed input and replay gates. No MCL oracle signature was
+requested; no funding, broadcasting, deployment or Nitro measurement occurred.
+
+**Decision: do not promote MCL under the unchanged limits.** Even the smallest
+and fastest measured configurations exceed their respective caps. Stock
+arkworks standard remains the measured unmodified alternative that fits fuel,
+but needs explicit authorization for a module cap of at least 91,610 bytes.
+No cap increase or return to private arithmetic rewrites is part of this result.
+
+MCL is established upstream software, not an audit certificate for this adapter.
+[Quarkslab's qualified 2020 assessment](https://blog.quarkslab.com/technical-assessment-of-the-herumi-libraries.html)
+covered older MCL v1.23, principally BLS12-381; it does not establish assurance
+for this exact BN_SNARK1/WASM configuration. The new adapter remains unaudited.
 
 ## Build the Nitro image
 

@@ -30,6 +30,27 @@ pub const PHASE_NAMES: [&str; 9] = [
 const PROFILE_NAMESPACE: &str = "checkzkp_profile";
 const PROFILE_MARK: &str = "mark";
 type Arguments = (i32, i32, i32, i32, i32, i32, i32, i32);
+type Groth16Arguments = (i32, i32, i32, i32, i32, i32);
+
+#[derive(Clone, Copy)]
+enum GuestAbi {
+    ProgramV1,
+    Groth16V1,
+}
+
+impl GuestAbi {
+    fn allocator(self) -> &'static str {
+        match self {
+            Self::ProgramV1 => "sapio_alloc_v1",
+            Self::Groth16V1 => "groth16_alloc_v1",
+        }
+    }
+}
+
+enum EntryPoint {
+    Program(TypedFunction<Arguments, i32>),
+    Groth16(TypedFunction<Groth16Arguments, i32>),
+}
 
 #[derive(Clone, Copy)]
 pub enum Admission {
@@ -46,9 +67,9 @@ impl Admission {
 
 /// Mirror ctv_emulators::program::wasm::check_compilation_budget, which is private.
 /// Use its public bounds and Wasmer's exact parser, not a second runtime policy.
-/// This ZKP benchmark permits only SHA256: other native crypto cannot substitute
-/// for guest arithmetic during optimization, even if the general ABI offers it.
-fn admit(bytes: &[u8], admission: Admission) -> Result<()> {
+/// Program-ABI controls permit SHA256 only; the generic proof ABI permits no
+/// imports. Neither path can replace guest curve arithmetic with a host call.
+fn admit(bytes: &[u8], admission: Admission, abi: GuestAbi) -> Result<()> {
     if matches!(admission, Admission::Scored) {
         ensure!(
             bytes.len() <= MAX_PROGRAM_BYTES,
@@ -79,6 +100,10 @@ fn admit(bytes: &[u8], admission: Admission) -> Result<()> {
             Payload::ImportSection(section) => {
                 for import in section {
                     let import = import?;
+                    ensure!(
+                        matches!(abi, GuestAbi::ProgramV1),
+                        "generic Groth16 verification permits no host imports"
+                    );
                     let (parameters, returns_value) = match (import.module, import.name) {
                         (CRYPTO_NAMESPACE, "sha256") => (3, true),
                         (PROFILE_NAMESPACE, PROFILE_MARK) if admission.profile() => {
@@ -165,13 +190,28 @@ pub struct MeteredGuest {
     module: Module,
     fuel: u64,
     profile: bool,
+    abi: GuestAbi,
     pub compile_time: Duration,
 }
 
 impl MeteredGuest {
     pub fn new(bytes: &[u8], fuel: u64, admission: Admission) -> Result<Self> {
+        Self::compile(bytes, fuel, admission, GuestAbi::ProgramV1)
+    }
+
+    /// Pure proof verification, not a Sapio signing predicate. Call
+    /// `measure(verifying_key, public_inputs, proof)` with upstream encodings.
+    pub fn for_groth16(bytes: &[u8], fuel: u64, admission: Admission) -> Result<Self> {
+        ensure!(
+            !admission.profile(),
+            "generic Groth16 has no profiling import"
+        );
+        Self::compile(bytes, fuel, admission, GuestAbi::Groth16V1)
+    }
+
+    fn compile(bytes: &[u8], fuel: u64, admission: Admission, abi: GuestAbi) -> Result<Self> {
         ensure!(fuel > 0, "fuel must be finite and positive");
-        admit(bytes, admission)?;
+        admit(bytes, admission, abi)?;
         let store = new_evaluator_store();
         let started = Instant::now();
         let module = Module::new(&store, bytes).context("compiling admitted module")?;
@@ -181,6 +221,7 @@ impl MeteredGuest {
             module,
             fuel,
             profile: admission.profile(),
+            abi,
             compile_time,
         })
     }
@@ -207,11 +248,18 @@ impl MeteredGuest {
 
     pub fn measure(&self, parameters: &[u8], view: &[u8], witness: &[u8]) -> Result<Measurement> {
         validate_inputs(parameters, view, witness)?;
+        if matches!(self.abi, GuestAbi::Groth16V1) {
+            ensure!(
+                view.len() <= MAX_PARAMETER_BYTES,
+                "public inputs exceed byte limit"
+            );
+        }
         // Reuse only the compiled module and the exact engine from new_evaluator_store.
         // Dropping each fresh Store releases all its instance objects and linear memory.
         let mut store = Store::new(self.engine.clone());
         let mut imports = Imports::new();
-        let crypto = add_crypto_imports(&mut store, &mut imports);
+        let crypto = matches!(self.abi, GuestAbi::ProgramV1)
+            .then(|| add_crypto_imports(&mut store, &mut imports));
         let profile = self.profile.then(|| {
             let env = FunctionEnv::new(&mut store, PhaseTracker::new(self.fuel));
             imports.define(
@@ -223,7 +271,9 @@ impl MeteredGuest {
         });
         let instance =
             Instance::new(&mut store, &self.module, &imports).context("instantiating module")?;
-        bind_crypto(&crypto, &mut store, &instance)?;
+        if let Some(crypto) = crypto {
+            bind_crypto(&crypto, &mut store, &instance)?;
+        }
         // The only allowance change is before any guest call, with start sections forbidden.
         // No callback, case retry, allocation, or verification ever refunds fuel.
         if self.fuel != INSTANCE_FUEL {
@@ -244,16 +294,25 @@ impl MeteredGuest {
         let memory = instance.exports.get_memory("memory")?.clone();
         let alloc: TypedFunction<i32, i32> = instance
             .exports
-            .get_typed_function(&store, "sapio_alloc_v1")?;
-        let evaluate: TypedFunction<Arguments, i32> = instance
-            .exports
-            .get_typed_function(&store, "sapio_evaluate_v1")?;
+            .get_typed_function(&store, self.abi.allocator())?;
+        let evaluate = match self.abi {
+            GuestAbi::ProgramV1 => EntryPoint::Program(
+                instance
+                    .exports
+                    .get_typed_function(&store, "sapio_evaluate_v1")?,
+            ),
+            GuestAbi::Groth16V1 => EntryPoint::Groth16(
+                instance
+                    .exports
+                    .get_typed_function(&store, "groth16_verify_v1")?,
+            ),
+        };
         ensure!(
             memory.view(&store).data_size() <= MAX_LINEAR_MEMORY_BYTES,
             "linear memory exceeds runtime limit"
         );
         let started = Instant::now();
-        // Inline WASM has an empty program argument, matching ProgramOracle::sign.
+        // ProgramV1: parameters/view/witness. Groth16V1: key/public inputs/proof.
         let inputs = [parameters, view, witness];
         let mut ranges: [Range<u64>; 3] = std::array::from_fn(|_| 0..0);
         for (index, bytes) in inputs.iter().enumerate() {
@@ -262,7 +321,10 @@ impl MeteredGuest {
             }
             let result = alloc.call(&mut store, bytes.len() as i32);
             remaining(&mut store, &instance, self.fuel)?;
-            let pointer = result.context("sapio_alloc_v1 trapped")?;
+            let pointer = result.with_context(|| format!("{} trapped", self.abi.allocator()))?;
+            if matches!(self.abi, GuestAbi::Groth16V1) {
+                ensure!(pointer != 0, "groth16_alloc_v1 failed");
+            }
             let start = u64::from(pointer as u32);
             let end = start
                 .checked_add(bytes.len() as u64)
@@ -285,20 +347,31 @@ impl MeteredGuest {
         for (bytes, range) in inputs.iter().zip(&ranges) {
             memory.view(&store).write(range.start, bytes)?;
         }
-        let result = evaluate.call(
-            &mut store,
-            0,
-            0,
-            ranges[0].start as i32,
-            parameters.len() as i32,
-            ranges[1].start as i32,
-            view.len() as i32,
-            ranges[2].start as i32,
-            witness.len() as i32,
-        );
+        let result = match evaluate {
+            EntryPoint::Program(evaluate) => evaluate.call(
+                &mut store,
+                0,
+                0,
+                ranges[0].start as i32,
+                parameters.len() as i32,
+                ranges[1].start as i32,
+                view.len() as i32,
+                ranges[2].start as i32,
+                witness.len() as i32,
+            ),
+            EntryPoint::Groth16(verify) => verify.call(
+                &mut store,
+                ranges[0].start as i32,
+                parameters.len() as i32,
+                ranges[2].start as i32,
+                witness.len() as i32,
+                ranges[1].start as i32,
+                view.len() as i32,
+            ),
+        };
         let elapsed = started.elapsed();
         let left = remaining(&mut store, &instance, self.fuel)?;
-        let result = result.context("sapio_evaluate_v1 trapped")?;
+        let result = result.context("guest evaluation trapped")?;
         let memory_bytes = memory.view(&store).data_size();
         ensure!(
             memory_bytes <= MAX_LINEAR_MEMORY_BYTES,
@@ -413,4 +486,27 @@ fn mark(mut env: FunctionEnvMut<'_, PhaseTracker>, phase: i32) -> Result<(), Run
     tracker.seen[phase] = true;
     tracker.calls += 1;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_allocator_failure_is_not_a_malformed_proof() -> Result<()> {
+        let module = wasmer::wat2wasm(
+            br#"(module
+                (memory (export "memory") 1 1024)
+                (func (export "groth16_alloc_v1") (param i32) (result i32)
+                    (i32.const 0))
+                (func (export "groth16_verify_v1")
+                    (param i32 i32 i32 i32 i32 i32) (result i32)
+                    (i32.const -1))
+            )"#,
+        )?;
+        let guest = MeteredGuest::for_groth16(&module, INSTANCE_FUEL, Admission::Scored)?;
+        // One nonempty buffer: overlapping allocations cannot mask a null result.
+        assert!(guest.measure(&[], &[0; 8], &[]).is_err());
+        Ok(())
+    }
 }

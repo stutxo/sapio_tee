@@ -1,0 +1,239 @@
+{
+  "format_version": 1,
+  "contract": {
+    "curve": "BN254",
+    "library": "arkworks 0.5.0; unmodified arithmetic and default Groth16 reduction",
+    "api": "verify(vk,proof,public_inputs)",
+    "encoding": "Exact uncompressed CanonicalSerialize output; bounded validated decoding; canonical identities allowed; no scalar reduction",
+    "maximumArgumentBytes": 65536,
+    "maximumPublicInputCount": 1015,
+    "policy": "Application authenticates/commits the reviewed verifier and VK, chooses the circuit/setup and derives transaction-bound public inputs. This core does not authorize spending.",
+    "reference": "Native reference uses the same arithmetic library, not independent crypto.",
+    "preparation": "Cold key validation and preparation inside every WASM call; no native prepared tables or folded constants"
+  },
+  "toolchain": {
+    "rustc": "1.98.1",
+    "binaryen": "132",
+    "wasmer": "6.1.0",
+    "sapio_revision": "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1",
+    "guest_optimization": "opt-level=s, LTO, one codegen unit; optimize.sh Binaryen flags",
+    "stack_bytes": 1048576
+  },
+  "module": {
+    "bytes": 107252,
+    "sha256": "600bef7179f2cf8b5ad6f4faa2ab86db8213c568d0ad8fc0240b3c7692a97c6f",
+    "imports": [],
+    "exports": [
+      {
+        "name": "memory",
+        "kind": "memory"
+      },
+      {
+        "name": "groth16_alloc_v1",
+        "kind": "function"
+      },
+      {
+        "name": "groth16_verify_v1",
+        "kind": "function"
+      }
+    ],
+    "memories": [
+      {
+        "flags": 1,
+        "initialPages": 128,
+        "maximumPages": 1024
+      }
+    ],
+    "start": false
+  },
+  "corpus": {
+    "path": "experiments/op_checkzkp/fixtures/generic-corpus.json",
+    "sha256": "52a12bb5a5015da9e0567badca6ce58b498f2cbeb2363ce0de3961e20c8dd75c",
+    "cases": 37,
+    "fullCases": 13,
+    "malformedCases": 24,
+    "fullWidthScalar": "9 * 2^200",
+    "metrics": {
+      "module_bytes": 107252,
+      "allowance": 1000000000,
+      "guest_cases": 37,
+      "full_cases": 13,
+      "valid_replays": 28,
+      "linear_memory_bytes": 8388608,
+      "maximum_full_verification_fuel": 339768557
+    },
+    "fullMeasurements": [
+      {
+        "name": "algebraic_0_inputs",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 165301843,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "algebraic_1_inputs",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 168010746,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "algebraic_6_inputs",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 198621592,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "algebraic_32_inputs",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 339724827,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "wrong_independent_key",
+        "replay": false,
+        "expected": "reject",
+        "verdict": "reject",
+        "fuel": 168018224,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "independent_setup_1_input",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 168029897,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "constrained_input_mutation",
+        "replay": false,
+        "expected": "reject",
+        "verdict": "reject",
+        "fuel": 198591092,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "last_of_32_inputs_mutation",
+        "replay": false,
+        "expected": "reject",
+        "verdict": "reject",
+        "fuel": 339768557,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "prime_order_proof_mutation",
+        "replay": false,
+        "expected": "reject",
+        "verdict": "reject",
+        "fuel": 167989613,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "unused_r1cs_input_original",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 173513431,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "unused_r1cs_input_changed_fresh_proof",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 173540424,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "algebraically_constructed_identity_ic",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 165333886,
+        "memoryBytes": 8388608
+      },
+      {
+        "name": "algebraically_constructed_identity_ic_changed_same_proof",
+        "replay": false,
+        "expected": "accept",
+        "verdict": "accept",
+        "fuel": 165333900,
+        "memoryBytes": 8388608
+      }
+    ]
+  },
+  "production": {
+    "moduleByteCap": 65536,
+    "fuel": 100000000,
+    "actualSdkAdmission": "Rejected: WASM evaluator module exceeds 65536 bytes",
+    "sizeOnlyDiagnostic": {
+      "completedFullCalls": 0,
+      "fullAndReplayExhaustions": 50
+    },
+    "limitsChanged": false,
+    "oracleSignatureRequested": false,
+    "funded": false
+  },
+  "checks": {
+    "directAbi": {
+      "moduleBytes": 107252,
+      "moduleSha256": "600bef7179f2cf8b5ad6f4faa2ab86db8213c568d0ad8fc0240b3c7692a97c6f",
+      "checks": [
+        "no imports or signing entrypoint; exact pure proof ABI",
+        "unallocated key pointer",
+        "wrapping proof pointer",
+        "public inputs cross allocated boundary",
+        "key length exceeds cap",
+        "proof length exceeds cap",
+        "public inputs length exceeds cap",
+        "empty proof ignores pointer and rejects length",
+        "failed allocation preserves later valid verification",
+        "three bounded buffers exhaust arena exactly",
+        "same-instance valid replay after malformed proof",
+        "maximum legal raw key and full-field inputs fit bounded heap"
+      ],
+      "maximumPublicInputs": 1015,
+      "maximumKeyBytes": 65480,
+      "maximumInputsBytes": 32488,
+      "observedMemoryBytes": 8388608,
+      "scope": "Actual pure proof ABI in unmetered Node; no oracle authorization or signature claim."
+    },
+    "externalRawFiles": {
+      "valid": "accept; exit 0",
+      "changedConstrainedInput": "false equation; exit 1",
+      "truncatedProof": "malformed; exit 1"
+    },
+    "maximumKey": {
+      "case": "Algebraically constructed identity IC; not a production setup or worst-case arithmetic",
+      "keyBytes": 65480,
+      "publicInputs": 1015,
+      "fuel": 194085998,
+      "memoryBytes": 8388608,
+      "nativeAndWasm": "Passed with 1B diagnostic; two valid replays"
+    },
+    "runtimeAdmission": [
+      "host imports rejected",
+      "start function rejected",
+      "1-unit exhaustion reported as execution error"
+    ],
+    "allocatorRegression": {
+      "reproducedBefore": true,
+      "fixed": true,
+      "keptTest": "runtime::tests::generic_allocator_failure_is_not_a_malformed_proof",
+      "passed": true
+    },
+    "retainedControl": {
+      "moduleBytes": 63683,
+      "maximumFuel": 65786641,
+      "frozenOutcomes": 43
+    }
+  },
+  "scope": "Frozen experimental public sample, not a universal worst-case bound, an independent cryptographic audit, Nitro timing, a production setup, or spending authorization."
+}
