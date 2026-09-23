@@ -1,5 +1,41 @@
 Unreleased
 
+- Add a separate generic BN254 Groth16 core with unchanged arkworks 0.5
+  arithmetic, raw canonical VK/proof/full-field inputs, bounded preflight
+  decoding, and cold key validation/preparation inside WASM. No built-in
+  SHA-secret relation, transaction policy, host imports, or signing entrypoint.
+  All 37 generated cases and 28 valid replays pass under an explicit 1B
+  diagnostic allowance; full-path maximum is 339,768,557 fuel and module size
+  is 107,252 bytes. Both exceed the unchanged production limits; actual Sapio
+  admission rejects the module and 100M diagnostics exhaust on full cases.
+  Validate raw-file verification, maximum-key/ABI boundaries, and execution
+  error classification; retain a null-allocation regression. Preserve the
+  frozen SHA-demo control/corpus and distinguish its prepared-key costs from
+  this generic primitive. Key trust and spend authorization remain external.
+
+- Add a pinned upstream-only MCL v4.10 BN_SNARK1 Groth16 comparison, with
+  canonical backend-specific G16L preparation and no upstream arithmetic edits.
+  All four stock C++/LLVM size-oriented builds pass the 43 frozen outcomes,
+  fresh-instance replay and 32 direct ABI/codec checks; the default also passes
+  computed-IC infinity cases and fresh high-fuel diagnostic proof/rejection gates.
+  The smallest module is 137,850 bytes; the fastest build uses 422,534,289 fuel.
+  Neither meets the unchanged limits. Actual admission rejects the default
+  module, and a fresh 100M-fuel diagnostic exhausts its allowance.
+  Preserve the retained fork, corpus and production limits. No MCL signing,
+  funding, deployment or audit certification is claimed.
+
+- Add a non-signing STWO 2.3.0 public-recurrence verifier experiment with a
+  native prover, fixed quadratic AIR, canonical bounded codec, embedded
+  preprocessing root, and public-input/context binding. No credential,
+  privacy, spending-authorization, funding, or deployment claim.
+  All 45 native checks, 28 module-size-only diagnostic WASM cases, and two
+  AIR/proving regressions pass. Valid proofs use 25,862,562–26,152,759 fuel
+  and at most 79,985 live requested heap bytes in the executed cases.
+  Production admission still rejects the 190,826-byte module; one witness
+  also exceeds 65,536 bytes. Preserve every production limit and the existing
+  Groth16 authorization rule; the different computations are not comparable
+  as a like-for-like backend benchmark.
+
 - Optimize the experimental pure-WASM BN254 Groth16 authorization verifier
   without changing production limits or the SHA256-secret/transaction relation.
   Retain bounded radix-32 Montgomery products, native-word carry/comparison

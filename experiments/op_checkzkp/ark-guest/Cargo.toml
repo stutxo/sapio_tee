@@ -1,0 +1,19 @@
+[package]
+name = "checkzkp-ark-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+msm = []
+
+[dependencies]
+ark-bn254 = { version = "=0.5.0", default-features = false, features = ["curve"] }
+ark-ec = { version = "=0.5.0", default-features = false }
+ark-ff = { version = "=0.5.0", default-features = false }
+ark-groth16 = { version = "=0.5.0", default-features = false }
+dlmalloc = { version = "=0.2.12", default-features = false }

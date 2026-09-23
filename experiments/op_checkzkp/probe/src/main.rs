@@ -1,10 +1,12 @@
 //! Local-only Groth16 feasibility experiment. Synthetic funding, no network.
 //! Diagnostic mode may bypass the module byte cap and increase fuel; it never signs.
+mod backend;
 mod benchmark;
 mod prepared;
 mod runtime;
 
 use anyhow::{bail, ensure, Context, Result};
+use backend::Backend;
 use bitcoin::bip32::Xpriv;
 use bitcoin::consensus::Encodable;
 use bitcoin::hashes::Hash;
@@ -28,55 +30,94 @@ enum Command {
         module: PathBuf,
         corpus: PathBuf,
         profile: Option<PathBuf>,
+        backend: Backend,
+        legacy_diagnostic: bool,
     },
     Legacy {
         module: PathBuf,
         diagnostic_fuel: Option<u64>,
+        backend: Backend,
     },
 }
 
 fn options() -> Result<Command> {
     let mut args = std::env::args_os().skip(1);
     let first = args.next().context(
-        "usage: checkzkp-probe MODULE.wasm [--diagnostic-fuel UNITS] | --generate-corpus PATH | --benchmark MODULE CORPUS [--profile-module MODULE]",
+        "usage: checkzkp-probe MODULE.wasm [--backend substrate|arkworks|mcl] [--diagnostic-fuel UNITS] | --generate-corpus PATH | --benchmark MODULE CORPUS [--backend substrate|arkworks|mcl] [--profile-module MODULE] [--legacy-diagnostic]",
     )?;
-    let command = if first == "--generate-corpus" {
-        Command::Generate(args.next().context("missing corpus output path")?.into())
-    } else if first == "--benchmark" {
+    if first == "--generate-corpus" {
+        let path = args.next().context("missing corpus output path")?.into();
+        ensure!(args.next().is_none(), "unexpected trailing arguments");
+        return Ok(Command::Generate(path));
+    }
+    if first == "--benchmark" {
         let module = args.next().context("missing benchmark module")?.into();
         let corpus = args.next().context("missing public corpus")?.into();
-        let profile = match args.next() {
-            None => None,
-            Some(flag) if flag == "--profile-module" => Some(
-                args.next()
-                    .context("missing diagnostic profile module")?
-                    .into(),
-            ),
-            Some(_) => bail!("unknown benchmark argument"),
-        };
-        Command::Benchmark {
+        let mut profile = None;
+        let mut backend = None;
+        let mut legacy_diagnostic = false;
+        while let Some(flag) = args.next() {
+            if flag == "--profile-module" {
+                ensure!(profile.is_none(), "duplicate --profile-module");
+                profile = Some(
+                    args.next()
+                        .context("missing diagnostic profile module")?
+                        .into(),
+                );
+            } else if flag == "--backend" {
+                ensure!(backend.is_none(), "duplicate --backend");
+                let value = args.next().context("missing backend")?;
+                backend = Some(Backend::parse(
+                    value.to_str().context("invalid backend encoding")?,
+                )?);
+            } else if flag == "--legacy-diagnostic" {
+                ensure!(!legacy_diagnostic, "duplicate --legacy-diagnostic");
+                legacy_diagnostic = true;
+            } else {
+                bail!("unknown benchmark argument {flag:?}");
+            }
+        }
+        let backend = backend.unwrap_or_default();
+        ensure!(
+            backend == Backend::Substrate || profile.is_none(),
+            "--profile-module is supported only for the substrate backend"
+        );
+        return Ok(Command::Benchmark {
             module,
             corpus,
             profile,
+            backend,
+            legacy_diagnostic,
+        });
+    }
+    ensure!(
+        !first.to_string_lossy().starts_with("--"),
+        "unknown argument {first:?}"
+    );
+    let mut diagnostic_fuel = None;
+    let mut backend = None;
+    while let Some(flag) = args.next() {
+        if flag == "--diagnostic-fuel" {
+            ensure!(diagnostic_fuel.is_none(), "duplicate --diagnostic-fuel");
+            let value = args.next().context("missing diagnostic fuel")?;
+            let fuel = value.to_str().context("invalid fuel encoding")?.parse()?;
+            ensure!(fuel > 0, "fuel must be positive");
+            diagnostic_fuel = Some(fuel);
+        } else if flag == "--backend" {
+            ensure!(backend.is_none(), "duplicate --backend");
+            let value = args.next().context("missing backend")?;
+            backend = Some(Backend::parse(
+                value.to_str().context("invalid backend encoding")?,
+            )?);
+        } else {
+            bail!("unknown argument {flag:?}");
         }
-    } else {
-        let diagnostic_fuel = match args.next() {
-            None => None,
-            Some(flag) if flag == "--diagnostic-fuel" => {
-                let value = args.next().context("missing diagnostic fuel")?;
-                let fuel = value.to_str().context("invalid fuel encoding")?.parse()?;
-                ensure!(fuel > 0, "fuel must be positive");
-                Some(fuel)
-            }
-            Some(_) => bail!("unknown argument"),
-        };
-        Command::Legacy {
-            module: first.into(),
-            diagnostic_fuel,
-        }
-    };
-    ensure!(args.next().is_none(), "unexpected trailing arguments");
-    Ok(command)
+    }
+    Ok(Command::Legacy {
+        module: first.into(),
+        diagnostic_fuel,
+        backend: backend.unwrap_or_default(),
+    })
 }
 
 fn transaction(key: XOnlyPublicKey) -> Result<Psbt> {
@@ -185,7 +226,7 @@ fn exercise(
         !prover.verify(&changed, witness)?,
         "native verifier accepted changed transaction"
     );
-    println!("PASS independent arkworks reference: valid / invalid / changed transaction");
+    println!("PASS native arkworks reference: valid / invalid / changed transaction");
 
     let guest = MeteredGuest::new(module, fuel, admission)?;
     println!(
@@ -245,15 +286,26 @@ fn main() -> Result<()> {
             module,
             corpus,
             profile,
-        } => benchmark::run(&module, &corpus, profile.as_deref()),
+            backend,
+            legacy_diagnostic,
+        } => benchmark::run(
+            &module,
+            &corpus,
+            profile.as_deref(),
+            backend,
+            legacy_diagnostic,
+        ),
         Command::Legacy {
             module,
             diagnostic_fuel,
-        } => legacy(module, diagnostic_fuel),
+            backend,
+        } => legacy(module, diagnostic_fuel, backend),
     }
 }
 
-fn legacy(path: PathBuf, diagnostic_fuel: Option<u64>) -> Result<()> {
+fn legacy(path: PathBuf, diagnostic_fuel: Option<u64>, backend: Backend) -> Result<()> {
+    println!("Backend: {}", backend.name());
+    println!("Reference: {}", backend.reference_description());
     let module = std::fs::read(path)?;
     println!(
         "Module: {} bytes; production limit: {MAX_PROGRAM_BYTES}; production fuel: {INSTANCE_FUEL}",
@@ -279,9 +331,9 @@ fn legacy(path: PathBuf, diagnostic_fuel: Option<u64>) -> Result<()> {
     );
     // Validate and prepare the fixed source key once, before committing the
     // resulting parameters in ProgramInstance and deriving its funding key.
-    // Proof generation and the independent native verifier retain the raw VK.
+    // Proof generation and the native arkworks reference retain the raw VK.
     let started = Instant::now();
-    let parameters = prepared::prepare_parameters(&prover.parameters())?;
+    let parameters = backend.prepare_parameters(&prover.parameters())?;
     println!(
         "Fixed-key preparation before funding: {:.3}s; parameters={} bytes",
         started.elapsed().as_secs_f64(),

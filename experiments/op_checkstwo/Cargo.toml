@@ -1,10 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["guest", "ark-guest", "generic-guest", "prover", "probe", "generic-probe", "vendor/substrate-bn"]
+members = ["verifier", "prover", "guest", "probe"]
 default-members = ["probe"]
 
+[workspace.dependencies]
+stwo = { version = "=2.3.0", default-features = false }
+stwo-constraint-framework = { version = "=2.3.0", default-features = false }
+
 [patch.crates-io]
-substrate-bn = { path = "vendor/substrate-bn" }
 bitcoin = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
 bitcoin_hashes = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
 miniscript = { git = "https://github.com/sapio-lang/rust-miniscript", rev = "8d2aa4a60979a55f6ecd6222d48f94a482f4a2f6" }
@@ -12,7 +15,7 @@ schemars = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b
 schemars_derive = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b06d0181a92ce5b4fddd86977f480cb9d086a" }
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"

@@ -1,0 +1,11 @@
+[package]
+name = "checkstwo-prover"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+checkstwo-verifier = { path = "../verifier" }
+stwo = { workspace = true, features = ["prover"] }
+stwo-constraint-framework = { workspace = true, features = ["prover"] }
