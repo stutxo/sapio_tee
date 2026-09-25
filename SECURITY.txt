@@ -122,9 +122,10 @@ security groups/firewalls must restrict both 8000 and 8367 before launch. The
 first setup API is particularly sensitive. The app's HTTP limits and Sapio's
 request/connection limits are not protection against a hostile parent.
 The deployed program profile admits four connections with a 30-second request
-I/O timeout. Program, preset parameters and witness are each bounded to
-65,536 bytes; the upstream evaluator enforces execution/host-crypto fuel and
-module limits. These are defense in depth, not a hard wall-clock bound on
+I/O timeout. Program bytes are bounded to 131,072 bytes; preset parameters and
+witness each retain their 65,536-byte bounds. The upstream evaluator enforces
+200,000,000 shared execution/host-crypto fuel points per instance and module
+limits. These are defense in depth, not a hard wall-clock bound on
 native WASM validation or compilation. An asynchronous I/O timeout cannot
 preempt that synchronous work; hostile inputs can still consume resources.
 
@@ -170,7 +171,7 @@ Its pinned EIF builder dependency:
 https://github.com/monzo/aws-nitro-util/tree/96f3bb204536dce32882a7e4affd6e8cea828b48
 
 Pinned Sapio ProgramOracle dependency:
-https://github.com/stutxo/sapio/tree/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
+https://github.com/stutxo/sapio/tree/bb5d57660e90878d0d75e60eb260eee97ef2574b
 Cargo.toml/Cargo.lock also pin the Bitcoin strict-decoding, Miniscript and
 schema dependencies used by that oracle. Read the actual locks when auditing.
 Reference reuse is not a claim that these repositories or this integration

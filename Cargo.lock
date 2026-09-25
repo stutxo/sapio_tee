@@ -989,7 +989,7 @@ dependencies = [
 [[package]]
 name = "ctv_emulators"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "bitcoin",
  "rand",
@@ -2616,7 +2616,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 [[package]]
 name = "sapio"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
@@ -2634,7 +2634,7 @@ dependencies = [
 [[package]]
 name = "sapio-base"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "bitcoin",
  "miniscript",
@@ -2648,7 +2648,7 @@ dependencies = [
 [[package]]
 name = "sapio-ctv-emulator-trait"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "bitcoin",
  "sapio-base",
@@ -2661,7 +2661,7 @@ dependencies = [
 [[package]]
 name = "sapio-psbt"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
@@ -2701,7 +2701,7 @@ dependencies = [
 [[package]]
 name = "sapio-wasm"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "bitcoin",
  "wasmer",
@@ -2712,7 +2712,7 @@ dependencies = [
 [[package]]
 name = "sapio_macros"
 version = "0.2.4"
-source = "git+https://github.com/stutxo/sapio?rev=c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1#c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1"
+source = "git+https://github.com/stutxo/sapio?rev=bb5d57660e90878d0d75e60eb260eee97ef2574b#bb5d57660e90878d0d75e60eb260eee97ef2574b"
 dependencies = [
  "proc-macro2",
  "quote",

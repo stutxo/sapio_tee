@@ -1,5 +1,10 @@
 Unreleased
 
+- Pin Sapio to bb5d57660e90878d0d75e60eb260eee97ef2574b: double the
+  module/program byte limit to 131,072 and instance fuel to 200,000,000.
+  Parameter, witness, memory, table, compilation-slot and transport limits,
+  instruction/crypto costs, evaluator ABIs and key derivation are unchanged.
+
 - Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
   that recomputes the BIP-446 template hash (nVersion, nLockTime,
   sha_sequences, sha_outputs, annex flag, input index) and lets the oracle

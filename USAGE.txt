@@ -426,9 +426,9 @@ bytes, blockchain state or a Bitcoin RPC connection. It has no filesystem,
 network, persistent state or access to the oracle's private root. External
 facts must arrive as evidence and be authenticated by the predicate.
 
-Limits include 65,536 bytes each for module/program, parameters and witness,
-a 1 MiB encoded transaction view, 64 MiB linear memory and 100 million shared
-execution/host-crypto fuel units. No WASI imports or start function are allowed.
+Limits include 131,072 bytes for module/program, 65,536 bytes each for parameters
+and witness, a 1 MiB encoded transaction view, 64 MiB linear memory and 200 million
+shared execution/host-crypto fuel units. No WASI imports or start function are allowed.
 Both ABIs expose sapio_crypto_v1 SHA256, public BIP32 derivation and 32-byte-
 message Schnorr verification. V2 additionally exposes sapio_crypto_v2 variable-
 length-message Schnorr verification and x-only tweak checking. Other pure
@@ -572,9 +572,9 @@ this encoding. Responses are SignedV1 or RejectedV1. HTTP 8000 has no signing
 endpoint, and this repository does not provide a general CLI covenant mode.
 
 Arbitrary inline predicates within the supported ABI and resource bounds do
-not require registry changes or an image rebuild. Program, parameter and
-witness bytes are each bounded to 65,536 bytes; WASM execution and host crypto
-share fuel limits. The service admits four connections with a 30-second
+not require registry changes or an image rebuild. Program bytes are bounded to
+131,072 bytes; parameters and witness each retain their 65,536-byte bounds.
+WASM execution and host crypto share fuel limits. The service admits four connections with a 30-second
 request I/O timeout. Native module validation/compilation is synchronous and
 cannot be preempted by that timeout: this is not a hard CPU deadline.
 Adding/changing a registered evaluator requires changing code/embedded bytes,
