@@ -542,7 +542,7 @@ dependencies = [
  "bitcoin_hashes",
  "hex-conservative 0.2.3",
  "hex_lit",
- "secp256k1",
+ "secp256k1 0.29.1",
  "serde",
 ]
 
@@ -2108,6 +2108,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "passkey-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bitcoin",
+ "hex",
+ "miniscript",
+ "p256",
+ "passkey-recovery",
+ "sapio-base",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "passkey-recovery"
+version = "0.1.0"
+dependencies = [
+ "secp256k1 0.33.0",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2687,6 +2710,8 @@ dependencies = [
  "hkdf",
  "miniscript",
  "p256",
+ "passkey-client",
+ "passkey-recovery",
  "sapio",
  "sapio-base",
  "serde",
@@ -2791,8 +2816,17 @@ checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
  "bitcoin_hashes",
  "rand",
- "secp256k1-sys",
+ "secp256k1-sys 0.10.1",
  "serde",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "519be132ce0792413872b1f2606f0fd8cbcf305c7120127704c60085c9bd4d63"
+dependencies = [
+ "secp256k1-sys 0.14.0",
 ]
 
 [[package]]
@@ -2800,6 +2834,15 @@ name = "secp256k1-sys"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0dba61e98ffcb8aaa452eb2be632df2f54a48f72a8facf8d275ec63610c55b7d"
 dependencies = [
  "cc",
 ]

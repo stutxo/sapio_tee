@@ -468,6 +468,236 @@ instance and derived key. A recompiled module cannot retroactively replace
 the rule on an already funded output. Archive the exact bytes, parameters,
 funding/script-path metadata and pinned identity needed to spend it later.
 
+Passkey browser wallet example
+-----------------------------
+examples/passkey/index.html is a static browser wallet. wallet.wasm constructs
+policies, addresses, PSBTs and finalized transactions; recovery.wasm performs
+the two-key MuSig2 operation. Normal signing sends one HTTPS request through
+deploy/web.py to the existing program oracle's framed TCP port. Visitors do
+not run Rust or a local wallet bridge. The enclave image, root and inline
+passkey.wasm predicate remain unchanged.
+
+Hosting and transport:
+Serve the page at a stable HTTPS origin, as a top-level document. The RP ID is
+the actual hostname, and the committed origin includes any non-default port.
+Changing the hostname, scheme or port changes the policy/address. Existing
+localhost wallets are not silently migrated to a new HTTPS origin. file://,
+cross-origin embedding and insecure remote HTTP are rejected.
+
+On the existing Amazon Linux 2023 EC2 parent, copy deploy/install-web.py,
+deploy/web.py, and these examples/passkey assets, retaining their paths:
+  index.html, style.css, app.js, wallet.js, wallet.wasm,
+  recovery.js, recovery.wasm, passkey.wasm
+Provide the ORIGINAL independently attestation-verified identity JSON and its
+trusted SHA256 digest. Merely hashing a fresh /public-key response is not
+attestation verification. Also provide a currently valid, trusted full TLS
+certificate chain and matching PEM private key for the hostname:
+
+  sudo python3 deploy/install-web.py \
+    --hostname wallet.example.com --assets examples/passkey \
+    --identity verified-identity.json --identity-sha256 VERIFIED_FILE_SHA256 \
+    --tls-cert fullchain.pem --tls-key private-key.pem
+
+DNS and inbound TCP 443 must already reach this parent. Arrange that ingress
+separately; do not run the full enclave Terraform deployment for a web update.
+The installer installs nginx if needed, validates the certificate/key/hostname,
+and writes /opt/sapio-wallet, /etc/nginx/conf.d/sapio-wallet.conf and
+/etc/systemd/system/sapio-wallet.service. The TLS key is root-only under
+/etc/sapio-wallet/tls. The transport runs as a restricted DynamicUser; it has
+no wallet secrets or KMS integration. nginx terminates TLS and forwards to the
+loopback-only adapter (default port 8081); the adapter's fixed upstream defaults
+to 127.0.0.1:8367. It never forwards setup requests, retries signing, or changes
+the oracle request/response JSON bytes. Requests and responses are limited to
+1,000,000 bytes, HTTP headers to 16 KiB, admitted adapter connections to four,
+and each adapter connection to a 30-second total deadline. Host/Origin checks
+and nginx's HTTPS forwarding header are required for production POSTs.
+
+Installation validates nginx configuration, activates the separate web service,
+and checks local HTTPS health/config and TCP reachability. It does not invoke
+setup, rebuild the EIF, replace EC2, change KMS or rotate the root. The installer
+and browser do not verify Nitro attestation; the supplied identity must already
+have been verified independently. Re-run this web-only installer for asset or
+certificate updates. --stage-dir PATH writes a reviewable installation tree
+without host commands or network requests, and never stages the TLS private key.
+
+The generated public wallet-config.json contains:
+  version: 1
+  identity: the complete verified /public-key identity object
+  sign_url: "./api/sign"
+  allow_local_dev: false
+It is loaded once per page initialization. All scripts/WASMs and signing use
+the same origin; no third-party JavaScript, CDN or npm runtime is required.
+
+For explicit localhost development, use README's local signer/identity first:
+
+  sha256sum local-identity.json
+  python3 deploy/install-web.py --stage-dir .local/passkey-web \
+    --hostname localhost --port 8080 --assets examples/passkey \
+    --identity local-identity.json --identity-sha256 LOCAL_FILE_SHA256 \
+    --allow-local-dev
+  python3 deploy/web.py --assets .local/passkey-web/opt/sapio-wallet/static \
+    --origin http://localhost:8080 --port 8080 --allow-local-dev
+
+Substitute the printed local file digest. Open http://localhost:8080, not
+127.0.0.1. This deliberately unattested software mode is not a Nitro claim.
+Production installation cannot enable this bypass.
+
+Workflow:
+1. Supply two compressed secp256k1 Bitcoin recovery public keys, each 33 bytes
+   (66 hex characters beginning 02/03), then enroll an ES256 passkey with UP/UV.
+   Full compressed keys are sorted lexicographically for BIP327 MuSig2 KeyAgg;
+   duplicate x coordinates, including opposite parities, are rejected.
+2. Export version-2 public metadata: credential ID, P-256 key, recovery key pair,
+   Taproot internal key, RP/origin, network, pinned root/module, program ID and
+   address. It contains no private key. Back up both recovery secrets separately.
+   A signer/module mismatch disables spending and preserves metadata for export.
+3. Start with synthetic funding. The default UTXO is fabricated; its real
+   signature cannot spend on-chain Bitcoin. Nothing is automatically broadcast.
+4. Select Passkey + enclave for normal spending, or Two-key recovery for a
+   script-path exit without the passkey or oracle. Prepare and review the whole
+   transaction before approving. Editing transaction fields invalidates review.
+   Recovery requires both matching raw 32-byte private keys (64 hex, not WIF),
+   in either order. Either key alone is insufficient. There is no timelock.
+5. Export a finalized binary PSBT or transaction hex. Manual mode supports one
+   UTXO, one native SegWit v0/v1 recipient, and optional change to this wallet.
+   Check the outpoint/value against your node yourself. There is no chain
+   lookup, coin selection, fee estimation, or broadcast endpoint.
+
+Generate two software-demo keys is deliberately a one-browser demonstration,
+not independent friends-and-family signers or hardware-protected custody. Never
+use production secrets here. Private keys and nonce randomness never go to the
+HTTPS adapter or oracle, localStorage, or public metadata. Temporary fields clear on
+each signing attempt (including failure), cancellation, forget, and pagehide.
+Mutable buffers/WASM memory are wiped best-effort; JavaScript strings cannot be
+reliably erased. Back up keys before using the demo. Losing either one prevents
+the recovery quorum, though a surviving passkey plus oracle can still spend.
+
+After assets and public config have loaded, recovery needs neither server nor
+network connectivity. Importing compatible public metadata, preparing a payment,
+signing and finalizing all run in the browser; no WebAuthn assertion or oracle
+call occurs. Keep the compatible assets/config, original origin, public metadata
+and separate key backups. Reloading still needs those assets served again; this
+is not a file:// wallet or a service-worker/offline-cache installation. Hosting
+integrity is critical: malicious page code could steal entered recovery keys.
+
+guest/src/lib.rs is a no_std inline v2 predicate using RustCrypto P-256 and the
+existing SHA256/x-only-tweak host imports. The checked-in passkey.wasm is
+65,414 bytes (below the 65,536-byte inline limit), SHA-256:
+  4216c2c8a657fdd9e268a543d2b075f28a6be363f659a07f2b45fcba583ab02f
+recovery/src/lib.rs uses secp256k1 0.33.0 / libsecp256k1's BIP327 implementation.
+Its browser-only recovery.wasm is 1,212,692 bytes, SHA-256:
+  fc080bb8cdeb167268ae97a04912d9f6fffba1dca1a853ae1bf990d4a875130d
+client/src/lib.rs builds the public-data wallet core, wallet.wasm:
+  3,598,916 bytes, SHA-256:
+  b82ef7ec1b740df572bae824a5034702898b39ac4135caf1963883fe6fc6cab9
+Neither browser module is uploaded to the enclave or subject to its inline
+policy-size cap. Both have zero host imports and use fresh bounded instances.
+wallet.js permits at most 32 MiB of memory; its JSON input and output buffers
+are each 1 MiB. recovery.js uses fresh WebCrypto randomness for each signer,
+single-use secret nonces,
+and verification of both partial signatures and the final BIP340 signature.
+No aggregate-key TapTweak is applied: that key is inside the recovery leaf.
+
+All three standalone Cargo.lock files and build.sh pin their dependency graphs
+and Rust 1.98.1/Clang 21.1.8 profiles; no WASI or external optimizer is used.
+Fetch all three locked graphs once as shown in README. build.sh --check
+reproduces exact bytes offline. Compiler caller-location paths are normalized;
+--write deliberately replaces artifacts. Run cargo test --locked --example
+passkey --no-default-features for authorization/recovery regressions and
+python3 -m unittest discover -s deploy -p test_web.py for transport regressions.
+
+Binary contract (integers are little-endian):
+  parameters = "SPK2" || network_genesis[32] || compressed_P256_key[33]
+             || recovery_leaf_hash[32] || SHA256(RP_ID)[32]
+             || origin_len_u32 || origin_UTF8
+  witness    = nonce[32] || auth_len_u32 || authenticatorData
+             || client_len_u32 || original_clientDataJSON
+             || signature_len_u32 || DER_ES256_signature
+  challenge  = SHA256("sapio-passkey/v2\0" || SHA256(parameters)
+                     || SHA256(raw_v2_transaction_view) || nonce)
+Genesis bytes use Bitcoin consensus/internal hash order, not displayed hex
+order. Shared contract.rs encoding matches the pinned Sapio v2 host view.
+The WebAuthn challenge is the 32 raw hash bytes, encoded unpadded base64url in
+clientDataJSON. The signature covers SHA256(authenticatorData ||
+SHA256(original_clientDataJSON)); never normalize or reserialize that JSON.
+
+Recovery is exactly one TapScript leaf:
+  script     = PUSH32 || MuSig2_aggregate_xonly_key[32] || OP_CHECKSIG
+  leaf_hash  = tagged_SHA256("TapLeaf", 0xc0 || 0x22 || script)
+  merkle_root = leaf_hash
+  output_key = TapTweak(program_derived_internal_key, merkle_root)
+  witness    = [aggregate_Schnorr_signature[64] || 0x01,
+                script[34], (0xc0 | output_parity) || internal_key[32]]
+The wallet core and browser checks independently aggregate the enrolled pair
+and construct this leaf/root before funding. The predicate commits the root; it
+does not implement MuSig2 itself. No extra leaves or merkle siblings are used.
+Recovery uses BIP341/BIP342 script-spend SIGHASH_ALL, no annex, key version zero,
+and the default code-separator position. The browser computes the digest from
+the verified transaction/prevout view rather than trusting a supplied digest.
+
+Browser wallet operations:
+wallet.js exports walletCall(operation, context, body, signal). Context contains
+the pinned identity, exact origin/RP ID and explicit local-development flag.
+The zero-import WASM JSON ABI takes {operation,context,body} and returns
+{ok:value} or {error:message}. Operations are:
+  configure: validate context and return public UI configuration.
+  wallet: derive the policy/address from public_key and recovery_keys.
+  prepare: construct a one-input PSBT from the public keys, funding outpoint/
+    value, recipient, amount_sats, fee_sats, path and passkey nonce when needed.
+  request: validate the passkey PSBT and assertion fields, then construct the
+    complete SignProgramV1 oracle envelope. This does not perform any I/O.
+  finalize_passkey: accept the original request and complete oracle response;
+    reject policy/PSBT substitution or extra mutations, verify SIGHASH_ALL
+    against the original pinned output key, then finalize locally.
+  finalize_recovery: accept public_key, recovery_keys, psbt and the 64-byte
+    aggregate signature; verify the exact tree/PSBT and signature, then finalize.
+Both finalizers return txid, transaction_hex, signed_psbt and fee_sats. No
+wallet-core operation accepts a recovery private key. recovery.js handles
+those secrets only in its separate MuSig2 module.
+
+Only POST /api/sign is a network wallet endpoint. It carries the complete
+SignProgramV1 envelope and returns SignedV1/RejectedV1; it is a byte-preserving
+HTTPS/TCP adapter, not a wallet backend. TCP framing is u32 big-endian JSON
+length followed by JSON bytes. The PSBT byte array inside the JSON has its own
+u32 big-endian serialized-PSBT length prefix. There are no HTTP wallet,
+preparation or recovery endpoints.
+
+examples/passkey/main.rs is now an optional native stdin JSON driver for the
+same wallet operations, not an HTTP server. Run cargo run --locked --example
+passkey with one ABI request on stdin. It is offline unless --oracle IP:PORT
+is explicitly supplied for a request operation, which signs and finalizes
+through the existing ProgramClient.
+
+The guest requires type=webauthn.get, the exact committed origin/challenge/RP,
+UP and UV, absent/false crossOrigin, and absent topOrigin. Duplicate recognized
+JSON fields are rejected; additional members are allowed by WebAuthn and remain
+covered by the signature. Assertions have exactly 37 authenticator-data bytes
+(no extensions), client JSON at most 4096 bytes, and strict DER signatures.
+High-S ES256 signatures and valid synced-passkey backup flags are accepted.
+It authenticates every input/prevout, output, amount, sequence, locktime and the
+selected input index, rejects annexes, and proves that the selected output is
+the Taproot tweak of its program-derived internal key plus the committed
+recovery root. Uncommitted or missing trees fail even with a valid assertion.
+Normal spending obtains and verifies an enclave SIGHASH_ALL key-path signature.
+
+This is a TEE-enforced authorization policy, not native Bitcoin P-256 consensus
+verification. Trust in the signer/attestation/root and correct browser display
+remains essential. Enrollment requests no authenticator attestation. Synced
+passkeys depend on the provider's security/recovery. The independent 2-of-2
+recovery path protects availability, not compromise of the enclave root: that
+root still controls the normal key path. Both recovery holders can deliberately
+bypass the passkey at any time; this is not a delayed or vetoable exit.
+The predicate is stateless: counters (including zero) are not freshness checks,
+and an assertion can be replayed for the identical committed transaction.
+Changing any committed spend detail requires a new valid assertion. There is
+no expiry, persistent nonce registry, or guaranteed new physical gesture for
+an identical replay. The UI requests fresh authorization for each attempt.
+
+SPK2 and metadata version 2 are a clean policy cutover, not an upgrade of funded
+outputs. Version-1 wallets have no committed recovery leaf and cannot gain one
+retroactively. Spend their funds using the original module/passkey policy
+before moving to a new address. The UI retains incompatible backups for export.
+
 For a working end-to-end reference, examples/program_oracle.rs contains an
 inline v2 lock-time predicate, funding/PSBT construction and verified client
 calls. It uses synthetic funding and is not a general file-upload/funding CLI.

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sapio · Passkey wallet</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" type="module"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Sapio / WASM spending policy</p>
+      <h1>A passkey. A two-key recovery path.</h1>
+      <p class="intro">A static Bitcoin wallet: build and verify transactions locally in WASM, authorize normal spends with your passkey and the live enclave, or recover offline with both Bitcoin keys. Review first, authorize second, export last. Nothing is broadcast.</p>
+      <div class="badges"><span id="network-badge">Loading static wallet…</span><span id="environment-badge">Public identity must be independently verified</span></div>
+    </header>
+
+    <aside class="warning" aria-label="Important limitations">
+      <strong>Start with synthetic funding, never real funds.</strong>
+      <p>The default demo UTXO does not exist on-chain. Its signed transaction cannot spend Bitcoin. Manual UTXOs are not checked against a node or chain.</p>
+      <p>Recovery requires both enrolled Bitcoin private keys, with no timelock and no passkey or enclave approval. Either recovery key alone is insufficient. Keep independent backups of both keys and the public metadata: metadata cannot replace a lost private key or passkey. Recovery protects availability, not against a compromised enclave root. Synced passkeys also depend on their authenticator provider.</p>
+      <details><summary>What this example does—and does not—prove</summary>
+        <p>Authenticator attestation is not requested: this does not prove which authenticator holds the passkey. Trust this page and its WASM assets to present the correct Bitcoin details; a passkey prompt is not a secure Bitcoin transaction display. The static configuration pins an enclave public identity that the operator must verify through a trusted channel. This page does not independently verify TEE attestation. Normal signing requires the configured HTTPS transport and live enclave; transaction building, response verification, and finalization happen locally. Two-key recovery needs no transport or enclave after the static assets and configuration are loaded.</p>
+        <p>The policy requires user presence and verification and commits to the whole transaction. It is stateless: an assertion can be replayed for that exact same policy and transaction. It has no expiry or persistent signature counter. This UI requests a fresh assertion for each signing attempt.</p>
+        <p>Keep the exact HTTPS origin and hostname stable: they are part of this wallet’s policy and passkey relying party. Moving the files to a new origin does not migrate an existing wallet. HTTP is allowed only for explicitly configured localhost development; a local fixture has no hardware TEE assurance.</p>
+      </details>
+    </aside>
+
+    <div class="status-bar"><p id="status" role="status" aria-live="polite">Loading wallet configuration…</p><button id="cancel" type="button" class="secondary" hidden>Cancel operation</button></div>
+    <p id="error" class="error" role="alert" hidden></p>
+    <noscript><p class="error">JavaScript and WebAssembly are required for WebAuthn and local transaction building, verification, and recovery. Enable them and reload this exact wallet origin.</p></noscript>
+
+    <section aria-labelledby="wallet-heading">
+      <div class="section-title"><span class="step">1</span><h2 id="wallet-heading">Enroll or restore</h2></div>
+      <p>Before creating a passkey, supply two distinct compressed secp256k1 Bitcoin public keys from your recovery signers. Import public metadata to restore an existing address; recovery does not require access to its passkey.</p>
+      <fieldset id="setup-fields" disabled>
+        <legend>Two-key recovery quorum — both keys required</legend>
+        <label for="recovery-public-1">Recovery public key 1</label><input id="recovery-public-1" class="mono" type="text" maxlength="66" pattern="0[23][0-9a-fA-F]{64}" autocomplete="off" spellcheck="false" aria-describedby="recovery-key-help">
+        <label for="recovery-public-2">Recovery public key 2</label><input id="recovery-public-2" class="mono" type="text" maxlength="66" pattern="0[23][0-9a-fA-F]{64}" autocomplete="off" spellcheck="false" aria-describedby="recovery-key-help">
+        <p id="recovery-key-help" class="muted">Each key is 66 hex characters (02 or 03 followed by its 32-byte x coordinate), not a passkey/P-256 key. Repeated keys, including opposite parities of the same key, are rejected. Changing this pair creates a different wallet.</p>
+        <button id="generate-recovery" type="button" class="secondary">Generate two software-demo keys</button>
+      </fieldset>
+      <div class="warning recovery-warning">
+        <strong>Software-key demonstration, not distributed signing or hardware protection.</strong>
+        <p>This page combines both recovery secrets in one browser for local MuSig2 signing. Use external, independently backed-up keys for a real recovery design; this software demo is not production custody. Generated secrets exist only in the temporary fields below. Back up each separately before closing, cancelling, forgetting, or attempting any signature. They are never automatically saved or exported.</p>
+      </div>
+      <details id="recovery-secrets">
+        <summary>Temporary software recovery private keys</summary>
+        <p class="muted">Enter raw 32-byte secp256k1 private keys as 64 hex characters, not WIF. Both must match the enrolled pair, in either order. They are used only after explicit recovery approval in an isolated WASM instance and are never sent over the network. Fields are cleared on every signing attempt, cancellation, and forget. JavaScript strings cannot be reliably erased from browser memory.</p>
+        <fieldset id="secret-fields">
+          <label for="recovery-private-1">Recovery private key 1 — temporary</label><input id="recovery-private-1" class="mono" type="password" maxlength="64" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <label for="recovery-private-2">Recovery private key 2 — temporary</label><input id="recovery-private-2" class="mono" type="password" maxlength="64" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <label class="check-label" for="show-recovery-secrets"><input id="show-recovery-secrets" type="checkbox" autocomplete="off"> Show temporary keys for manual, separate backups</label>
+        </fieldset>
+      </details>
+      <div class="actions">
+        <button id="enroll" type="button" disabled>Create passkey wallet</button>
+        <label class="file-label" for="restore-file">Import public metadata <input id="restore-file" type="file" accept="application/json,.json" disabled></label>
+        <button id="reconnect" type="button" class="secondary" hidden disabled>Retry retained metadata</button>
+      </div>
+      <div id="wallet-details" hidden>
+        <label for="wallet-address">Policy-bound receiving address</label>
+        <input id="wallet-address" type="text" class="mono" readonly spellcheck="false">
+        <p id="wallet-note" class="muted"></p>
+      </div>
+        <div class="actions"><button id="export-metadata" type="button" class="secondary" disabled>Export public metadata</button><button id="forget" type="button" class="secondary" disabled>Forget this browser’s metadata</button></div>
+      <details class="identity"><summary>Inspect pinned identity and policy</summary>
+        <dl><dt>Origin / relying party</dt><dd id="identity-origin">—</dd><dt>Network genesis (consensus order)</dt><dd id="identity-genesis" class="mono">—</dd><dt>Root extended public key</dt><dd id="identity-root" class="mono">—</dd><dt>WASM SHA-256</dt><dd id="identity-module" class="mono">—</dd><dt>Program ID</dt><dd id="identity-program" class="mono">—</dd><dt>Passkey public key</dt><dd id="identity-passkey" class="mono">—</dd><dt>Taproot internal key</dt><dd id="identity-internal" class="mono">—</dd><dt>Recovery public keys (2-of-2)</dt><dd id="identity-recovery" class="mono">—</dd><dt>Recovery aggregate / leaf hash</dt><dd id="identity-leaf" class="mono">—</dd></dl>
+      </details>
+    </section>
+
+    <section aria-labelledby="spend-heading">
+      <div class="section-title"><span class="step">2</span><h2 id="spend-heading">Build a one-input spend</h2></div>
+      <form id="spend-form">
+        <fieldset id="spend-fields" disabled>
+          <legend class="sr-only">Transaction details</legend>
+          <label for="spend-path">Authorization path</label>
+          <select id="spend-path"><option value="passkey">Passkey + enclave — normal spend</option><option value="recovery">Two-key recovery — no passkey or enclave</option></select>
+          <p id="path-warning" class="mode-notice">Normal spending requires the original passkey and the live enclave through the configured HTTPS signing transport.</p>
+          <label for="funding-mode">Funding source</label>
+          <select id="funding-mode"><option value="synthetic">Synthetic demo — not real funds</option><option value="manual">Manual UTXO — verify independently</option></select>
+          <p id="funding-warning" class="mode-notice">Synthetic UTXO: no on-chain funds. The demo recipient is a fixture, not your wallet.</p>
+          <button id="autofill" type="button" class="secondary">Reset synthetic demo fields</button>
+          <div class="grid">
+            <div class="wide"><label for="funding-txid">Funding transaction ID</label><input id="funding-txid" class="mono" type="text" minlength="64" maxlength="64" pattern="[0-9a-fA-F]{64}" required autocomplete="off" spellcheck="false" aria-describedby="funding-help"></div>
+            <div><label for="funding-vout">Output index (vout)</label><input id="funding-vout" type="text" inputmode="numeric" pattern="[0-9]+" required autocomplete="off"></div>
+            <div><label for="funding-value">UTXO value (sats)</label><input id="funding-value" type="text" inputmode="numeric" pattern="[0-9]+" required autocomplete="off"></div>
+          </div>
+          <p id="funding-help" class="muted">One output sent to the exact receiving address above. The amount must be the actual prevout value. No balance lookup or coin selection is performed.</p>
+          <label for="recipient">Recipient address — native SegWit only</label><input id="recipient" class="mono" type="text" maxlength="90" required autocomplete="off" spellcheck="false" aria-describedby="recipient-help">
+          <p id="recipient-help" class="muted">Checksummed bech32 / bech32m on the configured network; no legacy or wrapped-SegWit addresses. Testnet, testnet4, and signet share an address prefix—verify the intended chain independently.</p>
+          <div class="grid"><div><label for="amount">Recipient amount (sats)</label><input id="amount" type="text" inputmode="numeric" pattern="[0-9]+" required autocomplete="off"></div><div><label for="fee">Absolute miner fee (sats)</label><input id="fee" type="text" inputmode="numeric" pattern="[0-9]+" required autocomplete="off"></div></div>
+          <p class="muted">Amounts are whole satoshis, not BTC. Change returns only to this wallet; dust is rejected, never silently added to the fee. Fees are not estimated.</p>
+          <button id="prepare" type="submit" disabled>Prepare and review</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section id="review" aria-labelledby="review-heading" hidden>
+      <div class="section-title"><span class="step">3</span><h2 id="review-heading" tabindex="-1">Review before authorizing</h2></div>
+      <p id="review-mode" class="mode-notice"></p>
+      <dl class="review-grid"><dt>Network</dt><dd id="review-network"></dd><dt>Funding outpoint</dt><dd id="review-funding" class="mono"></dd><dt>Input value</dt><dd id="review-value"></dd><dt>Recipient</dt><dd id="review-recipient" class="mono"></dd><dt>Recipient amount</dt><dd id="review-amount"></dd><dt>Miner fee</dt><dd id="review-fee"></dd><dt>Change</dt><dd id="review-change"></dd><dt>Change address</dt><dd id="review-change-address" class="mono"></dd><dt>Transaction ID</dt><dd id="review-txid" class="mono"></dd></dl>
+      <p id="review-verification" class="verified"></p>
+      <p id="review-authorization"></p>
+      <button id="approve" type="button" disabled>Approve with passkey &amp; sign</button>
+    </section>
+
+    <section id="result" aria-labelledby="result-heading" hidden>
+      <div class="section-title"><span class="step">4</span><h2 id="result-heading" tabindex="-1">Signed, not broadcast</h2></div>
+      <p id="result-note"></p>
+      <label for="result-txid">Transaction ID</label><input id="result-txid" class="mono" readonly>
+      <label for="transaction-hex">Signed transaction (hex)</label><textarea id="transaction-hex" class="mono" rows="5" readonly spellcheck="false"></textarea>
+      <label for="signed-psbt">Signed PSBT (base64)</label><textarea id="signed-psbt" class="mono" rows="5" readonly spellcheck="false"></textarea>
+      <div class="actions"><button id="export-transaction" type="button" class="secondary" disabled>Download transaction hex</button><button id="export-psbt" type="button" class="secondary" disabled>Download PSBT</button></div>
+    </section>
+    <footer>Only public metadata is saved or exported as a wallet backup. Passkey private material never enters this page; software recovery secrets temporarily do. Nothing on this page broadcasts a transaction.</footer>
+  </main>
+</body>
+</html>

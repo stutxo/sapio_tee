@@ -119,6 +119,100 @@ update an already funded contract. See [provenance and encoding](examples/vault/
 CI checks the exact WASM bytes and runs both signing examples. This inline
 program needs no registry change or enclave redeployment.
 
+### Example: a passkey wallet with two-key recovery
+
+[`examples/passkey`](examples/passkey) is a static
+[`index.html`](examples/passkey/index.html) wallet with JavaScript and
+source-built browser WASM. Visitors need a WebAuthn-capable browser, not a local
+Rust server. Its Taproot address has two spending paths:
+
+- **Normal key path:** the committed passkey authorizes the complete transaction
+  before the enclave oracle signs.
+- **Recovery script path:** both enrolled Bitcoin keys produce a MuSig2 signature
+  for one aggregate-key `OP_CHECKSIG` leaf. Neither the passkey nor the oracle is
+  needed. There is **no timelock**; either recovery key alone is insufficient.
+
+Open the operator's **HTTPS wallet URL**. The browser builds and checks
+transactions locally; normal signing sends one program-oracle request through
+the EC2 parent's HTTPS-to-TCP adapter. Recovery never uses that adapter.
+
+Deploy the web surface separately on the **existing Amazon Linux 2023 parent**.
+Copy `deploy/install-web.py`, `deploy/web.py`, and the static assets from
+`examples/passkey/` there, retaining their relative paths, then run:
+
+```sh
+sudo python3 deploy/install-web.py \
+  --hostname wallet.example.com --assets examples/passkey \
+  --identity verified-identity.json --identity-sha256 VERIFIED_FILE_SHA256 \
+  --tls-cert fullchain.pem --tls-key private-key.pem
+```
+
+Supply the original independently attestation-verified public identity, its
+trusted file digest, and a valid certificate/key for the stable hostname. DNS
+and inbound TCP 443 must already reach this parent. The installer configures
+nginx and a bounded loopback transport service; it does **not** rebuild the EIF,
+run setup, replace EC2, change KMS, or rotate the root. Do not run the full
+enclave deployment for a web-only update. See [USAGE.txt](USAGE.txt) for the
+explicit localhost development mode and staging commands.
+
+1. Enter **two compressed secp256k1 public keys**: 66 hex characters beginning
+   with `02` or `03`. These are Bitcoin keys, not P-256 passkey keys. The pair is
+   canonically sorted; repeated keys, including opposite parities, are rejected.
+2. For a disposable demo, **Generate two software-demo keys** fills temporary
+   public/private-key fields. Back up each private key separately before any
+   signing attempt. This deliberately puts both keys in one browser: it is not
+   distributed friends-and-family signing or hardware-backed custody.
+3. Create the ES256 passkey and export **public metadata**. It includes the
+   recovery public keys and internal key, never private keys.
+4. Prepare the synthetic spend, review recipient/fee/change, and approve using
+   **Passkey + enclave** or **Two-key recovery**. Recovery takes both matching
+   raw 32-byte private keys in the temporary fields, in either order. It signs
+   locally with source-built `libsecp256k1` MuSig2; secrets never go to the HTTPS
+   adapter or oracle and are not persisted. Temporary fields clear after every
+   signing attempt, cancellation, forget, or page close.
+5. Download the finalized binary PSBT or transaction hex. Nothing broadcasts.
+
+After the static assets and public config have loaded, recovery works with
+**both web and oracle servers stopped and the browser offline**. Keep the
+compatible static assets/config, public metadata, and separate private-key
+backups. Reloading still requires serving those assets at the original origin;
+this is not a `file://` wallet or an installed offline cache. There are no npm
+dependencies or external scripts. Hosting integrity matters: malicious wallet
+JavaScript could steal recovery keys entered into the page.
+
+The synthetic input does not exist on-chain. Manual mode accepts one explicitly
+entered UTXO and native SegWit recipients, but performs no balance, confirmation,
+or prevout lookup. **This is an example, not production custody.** Do not enter
+production recovery secrets into this demo. A passkey prompt is not a trusted
+Bitcoin transaction display. The browser does not verify TEE attestation, and
+the development software signer is not a TEE. Recovery protects availability,
+**not compromise of the enclave's Bitcoin root key**. Losing either recovery
+key prevents this 2-of-2 exit; public metadata cannot replace any private key.
+
+All three checked-in WASMs work without rebuilding. To reproduce them, fetch
+their standalone locked dependencies once, then build offline with the
+Nix-pinned Rust 1.98.1 and Clang 21.1.8:
+
+```sh
+nix develop --no-update-lock-file -c cargo fetch --locked \
+  --manifest-path examples/passkey/guest/Cargo.toml --target wasm32-unknown-unknown
+nix develop --no-update-lock-file -c cargo fetch --locked \
+  --manifest-path examples/passkey/recovery/Cargo.toml --target wasm32-unknown-unknown
+nix develop --no-update-lock-file -c cargo fetch --locked \
+  --manifest-path examples/passkey/client/Cargo.toml --target wasm32-unknown-unknown
+nix develop --no-update-lock-file -c bash examples/passkey/build.sh --check
+nix develop --no-update-lock-file -c cargo test --locked --example passkey
+```
+
+Use `--write` only when intentionally replacing built artifacts. Changing the
+predicate, credential, recovery pair, origin, network, or root creates a
+different wallet. **Existing version-1 addresses have no recovery leaf: this
+does not retrofit recovery onto their funds.** Move those funds using their
+original policy before adopting the new wallet. Incompatible metadata is kept
+for export, never silently upgraded. See [USAGE.txt](USAGE.txt) for exact
+encodings and trust boundaries. No enclave registry or signing-protocol change
+is needed for this inline v2 policy.
+
 ## Build the Nitro image
 
 ```sh

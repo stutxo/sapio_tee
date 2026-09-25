@@ -1,0 +1,28 @@
+[package]
+name = "passkey-recovery"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98.1"
+license = "MPL-2.0"
+publish = false
+
+# Keep the browser cryptography build independent of native host features.
+[workspace]
+
+[lib]
+name = "passkey_recovery"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["browser-abi"]
+browser-abi = []
+
+[dependencies]
+secp256k1 = { version = "=0.33.0", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

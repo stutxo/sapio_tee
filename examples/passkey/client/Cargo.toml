@@ -1,0 +1,40 @@
+[package]
+name = "passkey-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98.1"
+license = "MPL-2.0"
+publish = false
+
+# Keep browser dependencies separate from the native oracle's host feature graph.
+[workspace]
+
+[lib]
+name = "passkey_client"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+bitcoin = { version = "=0.32.102", features = ["serde"] }
+hex = "0.4"
+miniscript = { version = "=13.1.0", features = ["compiler", "serde"] }
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+passkey-recovery = { path = "../recovery", default-features = false }
+sapio-base = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[patch.crates-io]
+bitcoin = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
+bitcoin_hashes = { git = "https://github.com/sapio-lang/rust-bitcoin", rev = "6ef940bb2d98ba5dece053fdabd1d9ad65ff5864" }
+miniscript = { git = "https://github.com/sapio-lang/rust-miniscript", rev = "8d2aa4a60979a55f6ecd6222d48f94a482f4a2f6" }
+schemars = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b06d0181a92ce5b4fddd86977f480cb9d086a" }
+schemars_derive = { git = "https://github.com/sapio-lang/sapio-jsonschema", rev = "ba2b06d0181a92ce5b4fddd86977f480cb9d086a" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

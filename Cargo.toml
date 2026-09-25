@@ -33,6 +33,8 @@ zeroize = "1"
 
 [dev-dependencies]
 miniscript = { version = "=13.1.0", features = ["compiler", "serde"] }
+passkey-client = { path = "examples/passkey/client" }
+passkey-recovery = { path = "examples/passkey/recovery" }
 sapio = { git = "https://github.com/stutxo/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
 wat = "=1.259.0"
 

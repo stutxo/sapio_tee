@@ -50,7 +50,12 @@
           version = "0.2.0";
           src = pkgs.lib.fileset.toSource {
             root = ./.;
-            fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ./evaluators ];
+            fileset = pkgs.lib.fileset.unions [
+              ./Cargo.toml ./Cargo.lock ./src ./evaluators
+              # Cargo resolves example-only path dependencies even for --bin.
+              ./examples/passkey/client ./examples/passkey/recovery
+              ./examples/passkey/contract.rs ./examples/passkey/passkey.wasm
+            ];
           };
           cargoLock = {
             lockFile = ./Cargo.lock;

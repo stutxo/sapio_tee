@@ -22,6 +22,21 @@ pub struct Identity {
     signing: ProgramProfile,
 }
 
+impl Identity {
+    pub fn is_local_dev(&self) -> bool {
+        self.mode == "local-dev"
+    }
+
+    pub fn network(&self) -> Result<Network> {
+        if self.is_local_dev() {
+            Ok(Network::Regtest)
+        } else {
+            serde_json::from_value(self.settings["network"].clone())
+                .context("Nitro identity settings need a named network")
+        }
+    }
+}
+
 pub struct Options {
     pub address: SocketAddr,
     identity: PathBuf,
@@ -43,7 +58,7 @@ pub fn options(example_name: &str) -> Result<Option<Options>> {
                      This example does NOT verify COSE or trust/fetch /public-key.\n\
                      --allow-local-dev permits an unattested local-dev identity with null settings\n\
                      and a test-network xpub, solely for synthetic regtest fixtures.\n\
-                     All funding is synthetic. Nothing is broadcast; no private keys are needed."
+                     Examples never broadcast. Follow each example's funding restrictions."
                 );
                 return Ok(None);
             }
@@ -98,8 +113,7 @@ pub fn load_identity(options: &Options) -> Result<Identity> {
             );
             // Canary only: the attestation verifier is the real check. A
             // network/xpub disagreement marks a file no verifier produced.
-            let network: Network = serde_json::from_value(identity.settings["network"].clone())
-                .context("Nitro identity settings need a named network")?;
+            let network = identity.network()?;
             ensure!(
                 identity.xpub.network == network.into(),
                 "Nitro identity xpub does not match its settings network"

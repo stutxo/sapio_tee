@@ -1,5 +1,30 @@
 Unreleased
 
+- Move wallet policy derivation, PSBT construction and finalization into a
+  standalone, zero-import browser WASM core. Replace the local Rust HTTP bridge
+  with static HTML/JavaScript/WASM and public config. Add a bounded,
+  byte-preserving HTTPS-to-TCP adapter and a separate nginx/systemd installer
+  for the existing EC2 parent; no EIF, KMS, setup or root change is required.
+  Verify the static page with a virtual WebAuthn authenticator and an isolated
+  real software oracle. Bitcoin Core regtest accepts both finalized spend paths;
+  recovery also succeeds with the passkey removed, both servers stopped, the
+  browser offline and zero network requests. This is not a live Nitro rollout.
+  Add pinned-context, hostile-response/PSBT and transport-boundary regressions.
+
+- Add an ES256 passkey-authorized Bitcoin wallet with a committed 2-of-2 MuSig2
+  script-path recovery leaf. Setup requires two distinct Bitcoin public keys;
+  normal spending still verifies WebAuthn inside inline WASM. Recovery needs
+  both keys but neither the passkey nor enclave, with no timelock. A source-built
+  libsecp256k1 browser module performs genuine MuSig2 software-demo signing;
+  private keys stay local and are never part of public metadata. Add independent
+  transaction/tree/sighash checks, backup/restore, finalized exports, and policy
+  and quorum regressions. SPK2/version-2 metadata creates new addresses; old
+  tree-free wallets are not retrofitted. The artifacts reproduce offline in CI.
+  Verify browser normal/recovery spends against Bitcoin Core regtest, including
+  recovery after stopping the oracle and removing the passkey credential.
+  Synthetic/manual UTXOs remain supported without chain lookup or broadcast.
+  No production enclave protocol or registered-evaluator change is required.
+
 - Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
   that recomputes the BIP-446 template hash (nVersion, nLockTime,
   sha_sequences, sha_outputs, annex flag, input index) and lets the oracle
