@@ -10,6 +10,16 @@ it never receives an application seed. The optional deploy/terraform configurati
 builds, uploads, provisions and initializes a complete single-box test deployment.
 Review SECURITY.txt before putting funds at risk.
 
+The Ark nested-signing integration is local to this repository. It authenticates
+the original spend and exact DEFAULT signature hash, then evaluates the committed
+program before S may produce a nonce or signature. Its bounded adapter uses
+upstream Sapio's WASM host and program metadata, preserving inline v1/v2 and the
+fixed registered evaluator semantics without a patched Sapio or transaction
+rewrite. Program evaluation and S live in the same enclave; native Ark C+A policy
+has no native-key fallback, raw-digest signing, or recovery exemption.
+Ark requests reject annexes: the authenticated native Ark signing context is
+annex-free. The ordinary Sapio ProgramOracle retains upstream v2 annex support.
+
 Native x86_64-linux builders are supported; the enclave image itself targets
 aarch64 (Graviton Nitro Enclaves) and the application is cross-compiled for
 aarch64-unknown-linux-musl with Rust 1.98.1. Do not
@@ -21,12 +31,103 @@ cross-account operation are not supplied configurations.
 
 Build
 -----
-Install Nix with nix-command and flakes enabled. From the repository root:
+Install Nix with nix-command and flakes enabled. This is a standalone repository:
+Sapio dependencies use https://github.com/sapio-lang/sapio at exact revision
+c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1, and ark-lib uses the public
+https://github.com/stutxo/saplingos revision recorded in Cargo.toml/Cargo.lock.
+The original Sapio repository is unmodified; no sibling checkouts are required.
 
-  nix flake check --no-update-lock-file --no-build
-  nix build --no-update-lock-file .#app --out-link result-app
-  nix build --no-update-lock-file .#enclaver --out-link result-runner
-  nix build --no-update-lock-file .#eif --out-link result-eif
+For a fresh checkout of public source only (also the CI build contract):
+
+  git clone https://github.com/stutxo/sapio_tee.git
+  cd sapio_tee
+  export TEE_FLAKE=.
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo check --locked --all-targets --no-default-features
+  nix build --no-update-lock-file "$TEE_FLAKE#app" --out-link result-app
+
+Do not use that shortcut for a worktree with private changes, operational state,
+or credentials. Review self-source BEFORE any Nix import as described next.
+
+IMPORTANT: never pass a live worktree as a path: flake or source input. Nix copies
+the complete input to its world-readable store BEFORE cleanSourceWith/fileset
+filters run. Ignored .env files, Terraform state, or credentials can leak at
+that first import. A later filter or a directory denylist does not prevent it.
+This rule also applies to the TEE flake itself, not only its dependencies.
+
+First make an explicit source inventory, using ordinary host Python and Git.
+This step does not invoke Nix. From the sapio_tee worktree, in Bash:
+
+  export SOURCE_REVIEW_DIR="$(mktemp -d)"
+  python3 scripts/source_snapshot.py plan \
+    --tee "$PWD" \
+    --output "$SOURCE_REVIEW_DIR/source-plan.json"
+
+The plan selects code extensions and named build inputs from tracked and
+untracked, nonignored files. It reads CURRENT worktree bytes, not a commit or
+index blob. New implementation files do not need git add. Additional required
+inputs can be selected with --include tee:RELATIVE_PATH.
+This candidate selection is NOT a confidentiality guarantee.
+
+STOP and review the plan before continuing. Review every selected path AND its
+contents for public disclosure, including new/untracked files and any embedded
+credentials. Remove private or unnecessary entries from each files array.
+Keep the exact paths, SHA256 digests, and executable flags for approved files.
+Do not approve an input merely because it has a source-code extension. Never
+add an entire directory or copy an entire worktree. An unreviewed plan must not
+be used with --reviewed.
+
+After that review, create a fresh code-only snapshot outside all worktrees:
+
+  export SOURCE_SNAPSHOT="$SOURCE_REVIEW_DIR/sources"
+  python3 scripts/source_snapshot.py create --reviewed \
+    --plan "$SOURCE_REVIEW_DIR/source-plan.json" --output "$SOURCE_SNAPSHOT"
+  export TEE_SOURCE="$SOURCE_SNAPSHOT/sapio_tee"
+  python3 scripts/source_snapshot.py verify "$TEE_SOURCE"
+  export TEE_FLAKE="path:$TEE_SOURCE"
+
+Creation copies only the approved regular files, checks their exact reviewed
+digests and executable flags, and rejects symlinks. A source change requires a
+new plan and review. A failed creation can leave a private partial directory:
+do not import it; choose a fresh destination after correcting the error.
+Successful snapshots have read-only files and directories. Each has a
+source-manifest.json with relative paths and exact digests, but no workstation
+paths. Verification rejects changed, missing, extra, or linked files.
+Do not add build outputs, private files, or credentials to these snapshots.
+Keep the reviewed plan and snapshots as source provenance. The plan contains
+local worktree paths; it stays outside the inputs sent to Nix.
+
+For a live/private worktree, import only this reviewed self-source snapshot:
+
+  nix build --no-update-lock-file "$TEE_FLAKE#app" --out-link result-app
+
+All dependencies resolve from public locked sources. The snapshot contains only
+this standalone TEE crate; there are no dependency source overrides.
+Do not modify snapshots between verification and a Nix command. Keep private
+operational state in the worktree or another directory, not in the snapshots.
+The Cargo.lock must already match the selected manifests; --locked rejects a
+stale lock. Neither packaging nor the build regenerates it.
+
+The snapshot lives at sources/sapio_tee and contains the selected TEE manifest,
+lock files, source, evaluators, examples and tests, plus source-manifest.json.
+Cargo's public git dependencies, including upstream embedded evaluator artifacts,
+are vendored from Cargo.lock by Nix. No local workspace layout or manifest rewrite
+is needed. --no-update-lock-file rejects changes to the checked-in flake pins.
+
+The development shell stays native x86_64. For example:
+
+  nix develop --no-update-lock-file "$TEE_FLAKE"
+
+The remaining shell commands use TEE_FLAKE. In each terminal, set it to "." only
+for a public-only checkout, or to "path:$TEE_SOURCE" after verifying the reviewed
+snapshot. Run native Cargo from the original worktree; the shell stays native
+and does not import that worktree into Nix when a snapshot flake is selected.
+Do not compile into the read-only snapshot. Nix package builds use the selected
+public checkout or reviewed snapshot directly.
+Building app does not assemble an EIF. Only when an image build is intended:
+
+  nix flake check --no-update-lock-file "$TEE_FLAKE" --no-build
+  nix build --no-update-lock-file "$TEE_FLAKE#enclaver" --out-link result-runner
+  nix build --no-update-lock-file "$TEE_FLAKE#eif" --out-link result-eif
 
 The default package is also the EIF. Outputs:
   app:       bin/sapio-tee and its identical bin/entrypoint copy
@@ -39,10 +140,10 @@ The application build uses Cargo.lock and --no-default-features. The local-dev
 feature is NOT in the EIF. Wasmer executes program predicates; the
 native compiler, cmake and build-host libclang are deliberate requirements —
 build-time binaries run on the x86_64 host, while the produced artifacts are
-aarch64. Git dependencies are fetched at exact
+aarch64. Remaining git dependencies are fetched at exact
 Cargo.lock revisions. Kernel, supervisor, toolchain and manifest changes can
-change measurements. Keep the source commit, Cargo.lock, flake.lock, EIF, build
-logs, and PCRs together. Builds can be large: upstream compiles a Nitro kernel.
+change measurements. Keep the public source revision or reviewed snapshot, Cargo.lock, flake.lock,
+EIF, build logs, and PCRs together. Builds can be large: upstream compiles a Nitro kernel.
 No byte-for-byte reproducibility or successful Nitro deployment is claimed
 solely because the inputs are pinned. Independently rebuild and compare the
 actual EIF and measurements before admitting an image to your policy.
@@ -52,21 +153,18 @@ with arch=aarch64 (arm64 defconfig kernel, `Image`, aarch64 musl statics, and
 the aarch64 ld-musl interpreter). Its monzo EIF builder includes the rootfs Nix
 closure; do not strip that
 closure (the supervisor startup script references its packaged interpreter).
-Two build-only compatibility adaptations are explicit in flake.nix: the
-pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set,
-and Sapio's tracked evaluators/artifacts are restored beside its vendored
-workspace crates from the exact same Cargo dependency revision. Neither
-adaptation substitutes the signer or attesting proxy.
+The pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set.
+Sapio's embedded evaluator artifacts come from its pinned public git source.
+Neither adaptation substitutes the signer or attesting proxy.
 The pinned aarch64-musl parent runner is a standalone static executable; it
 has no ELF interpreter, shared-library dependencies, or Nix store references.
 Copy bin/enclaver and the standalone EIF directly; the parent does not need
 Nix. Recheck those properties if you change the runner build. The closure
 inside the EIF remains part of the image and must not be stripped.
 
-CI runs locked production/local-dev Rust checks, signed attestation fixtures,
-the live ProgramClient demonstration, Nix evaluation, actual musl/runner/EIF
-builds, and uploads build-emitted measurements. CI has no AWS credentials and
-does not prove Nitro boot, hardware attestation, IAM enforcement or KMS access.
+CI runs locked Rust tests, evaluator artifact checks, the local signing protocol,
+and the aarch64 image build from a standalone public checkout. Historical CI and
+Nitro evidence does not verify a newly changed image.
 
 One-apply Terraform test deployment
 -----------------------------------
@@ -100,6 +198,10 @@ Prerequisites:
 - An x86_64 Linux workstation with Nix, Python >= 3.9, Terraform >= 1.7 and < 2,
   AWS CLI v2, and normal locally configured AWS credentials (e.g. AWS_PROFILE).
   No manual nix build, scp, key-policy upload or SSH launch is needed.
+  Export TEE_SOURCE to the reviewed code-only TEE snapshot before Terraform
+  plan/apply. Its build.py verifies that inventory before each Nix import.
+  repository_root remains the operational worktree; it is NEVER a Nix path:
+  input. Keep the snapshot unchanged. Dependencies use the public lock files.
 - Run Terraform as the existing same-account IAM role given by
   kms_admin_role_arn. Supply its IAM ARN, NOT its temporary STS session ARN.
   That role needs EC2/IAM provisioning and PassRole, KMS key administration,
@@ -314,12 +416,23 @@ POST /setup and GET /public-key return the same object:
        {"name":"pay-at-least/v1","id":"c99794a01b53f5d41775d7f01e6d13afa072ab113540109267846af40d159111","wasm_version":1}
      ],
      "max_connections":4,
-     "request_timeout_secs":30
+     "request_timeout_secs":30,
+     "ark_signing":{
+       "protocol":"sapio-ark/nested-signing/1",
+       "max_pending_sessions":256,
+       "session_lifetime_secs":120
+     }
    }}
 The ellipses describe response fields, not usable settings or an xpub. signing
 is the complete deployed profile; registered IDs commit exact interpreter
 bytes and ABI, not merely friendly names. The embedded pay_at_least.wasm has
 SHA256 9d3aecb3a85f38fdaeb467e28d11f5e184b92b9a3deef98201e41b4ecfb09ace.
+ark_signing is mandatory. Verifiers accept exactly the nested signing protocol
+and integer session limits above. Missing fields, extra fields, other protocols,
+or different limits are rejected, even in a genuinely signed identity. This
+contract requires both the user key and the program-controlled TEE key; program
+evaluation and the TEE key remain in the same enclave. It does not authorize raw
+digest signing or a recovery exception.
 The root/settings publish atomically and cannot be changed within a process.
 A second setup conflicts with HTTP 409. KMS failure returns 502 and does not
 publish a signer. /health returns 503 until initialized and 200 afterward.
@@ -426,9 +539,9 @@ bytes, blockchain state or a Bitcoin RPC connection. It has no filesystem,
 network, persistent state or access to the oracle's private root. External
 facts must arrive as evidence and be authenticated by the predicate.
 
-Limits include 131,072 bytes for module/program, 65,536 bytes each for parameters
-and witness, a 1 MiB encoded transaction view, 64 MiB linear memory and 200 million
-shared execution/host-crypto fuel units. No WASI imports or start function are allowed.
+Limits include 65,536 bytes each for module/program, parameters and witness,
+a 1 MiB encoded transaction view, 64 MiB linear memory and 100 million shared
+execution/host-crypto fuel units. No WASI imports or start function are allowed.
 Both ABIs expose sapio_crypto_v1 SHA256, public BIP32 derivation and 32-byte-
 message Schnorr verification. V2 additionally exposes sapio_crypto_v2 variable-
 length-message Schnorr verification and x-only tweak checking. Other pure
@@ -478,12 +591,12 @@ inside the enclave, and main.rs for compilation and remote signing.
 
 Run against a local-dev signer using its explicitly untrusted local identity:
 
-  nix develop --no-update-lock-file -c cargo run --locked --example vault -- \
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo run --locked --example vault -- \
     --address 127.0.0.1:8367 --identity local-identity.json --allow-local-dev
 
 Against Nitro, use the independently verified identity and omit the bypass:
 
-  nix develop --no-update-lock-file -c cargo run --locked --example vault -- \
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo run --locked --example vault -- \
     --address PARENT_IP:8367 --identity verified-identity.json
 
 Both invocations still use synthetic funding and never broadcast. The example
@@ -498,7 +611,7 @@ The client embeds examples/vault/vault.wasm. The pinned Nix shell includes
 wasm32-unknown-unknown for reproducing this artifact from predicate.rs and the
 unchanged upstream guest.rs helper:
 
-  nix develop --no-update-lock-file -c bash examples/vault/build.sh --check
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c bash examples/vault/build.sh --check
 
 Use --write only for intentional artifact updates after editing the source.
 The default --check never overwrites a mismatch. The module is inline v1 and
@@ -572,9 +685,9 @@ this encoding. Responses are SignedV1 or RejectedV1. HTTP 8000 has no signing
 endpoint, and this repository does not provide a general CLI covenant mode.
 
 Arbitrary inline predicates within the supported ABI and resource bounds do
-not require registry changes or an image rebuild. Program bytes are bounded to
-131,072 bytes; parameters and witness each retain their 65,536-byte bounds.
-WASM execution and host crypto share fuel limits. The service admits four connections with a 30-second
+not require registry changes or an image rebuild. Program, parameter and
+witness bytes are each bounded to 65,536 bytes; WASM execution and host crypto
+share fuel limits. The service admits four connections with a 30-second
 request I/O timeout. Native module validation/compilation is synchronous and
 cannot be preempted by that timeout: this is not a hard CPU deadline.
 Adding/changing a registered evaluator requires changing code/embedded bytes,
@@ -584,7 +697,7 @@ and trusting a new expected profile. No runtime registry upload is offered.
 After attestation verification, the demonstration can consume the verified
 identity without any local-development bypass:
 
-  nix develop --no-update-lock-file -c cargo run --locked --example program_oracle -- \
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo run --locked --example program_oracle -- \
     --address 127.0.0.1:8367 --identity verified-identity.json
 
 This example uses synthetic funding, exercises ProgramClient signature
@@ -629,16 +742,16 @@ Local verification (not enclave evidence)
 ----------------------------------------
 For software-only development, run on an ordinary x86_64 Linux workstation:
 
-  nix develop --no-update-lock-file -c cargo test --locked --no-default-features
-  nix develop --no-update-lock-file -c cargo test --locked --features local-dev
-  nix develop --no-update-lock-file -c python3 -m unittest discover -s tests -p 'test_*.py'
-  nix develop --no-update-lock-file -c cargo run --locked --features local-dev -- --local-dev
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo test --locked --no-default-features
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo test --locked --features local-dev
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c python3 -m unittest discover -s tests -p 'test_*.py'
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo run --locked --features local-dev -- --local-dev
 
 From a second terminal:
 
   curl --fail http://127.0.0.1:8000/health
   curl --fail http://127.0.0.1:8000/public-key > local-identity.json
-  nix develop --no-update-lock-file -c cargo run --locked --example program_oracle -- \
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c cargo run --locked --example program_oracle -- \
     --address 127.0.0.1:8367 --identity local-identity.json --allow-local-dev
 
 The explicit local-only flag permits the unattested identity. Local mode creates

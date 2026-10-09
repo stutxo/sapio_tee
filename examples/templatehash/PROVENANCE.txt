@@ -41,8 +41,9 @@ locktime rejects.
 
 Build and byte verification
 ---------------------------
-Run from the repository root, using the pinned Nix development shell:
-  nix develop --no-update-lock-file -c bash examples/templatehash/build.sh --check
+Run from the repository root after selecting TEE_FLAKE as described in USAGE.txt
+(public-only checkout, or positively reviewed self-source snapshot):
+  nix develop --no-update-lock-file "$TEE_FLAKE" -c bash examples/templatehash/build.sh --check
 The build uses rustc 1.98.1 from PATH with the same cdylib/no_std flags as
 the vault example (crate name sapio_templatehash_predicate, opt-level=z,
 LTO, codegen-units=1, panic=abort, strip=symbols, 65,536-byte stack, initial

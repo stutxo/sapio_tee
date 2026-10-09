@@ -97,6 +97,11 @@ class AttestationVerification(unittest.TestCase):
             }],
             "max_connections": 4,
             "request_timeout_secs": 30,
+            "ark_signing": {
+                "protocol": "sapio-ark/nested-signing/1",
+                "max_pending_sessions": 256,
+                "session_lifetime_secs": 120,
+            },
         }
         cls.identity = {"protocol": "sapio-tee/program-oracle/1", "mode": "nitro",
                         "xpub": TESTNET_XPUB, "settings": cls.settings,
@@ -186,6 +191,44 @@ class AttestationVerification(unittest.TestCase):
             identity = dict(self.identity, signing=profile)
             with self.subTest(profile=profile), self.assertRaises(ValueError):
                 self.verify(self.signed_response(identity=identity), program_profile=profile)
+
+    def test_ark_signing_contract_mismatches_are_rejected(self):
+        expected = self.program_profile["ark_signing"]
+        profiles = [
+            {key: value for key, value in self.program_profile.items() if key != "ark_signing"},
+        ]
+        invalid_contracts = [
+            None, {}, [],
+            expected | {"protocol": "SignProgramV1"},
+            expected | {"protocol": "sapio-ark/nested-signing/2"},
+            expected | {"max_pending_sessions": 255},
+            expected | {"max_pending_sessions": 257},
+            expected | {"max_pending_sessions": True},
+            expected | {"max_pending_sessions": 256.0},
+            expected | {"max_pending_sessions": "256"},
+            expected | {"session_lifetime_secs": 119},
+            expected | {"session_lifetime_secs": 121},
+            expected | {"session_lifetime_secs": False},
+            expected | {"session_lifetime_secs": 120.0},
+            expected | {"session_lifetime_secs": "120"},
+            expected | {"raw_digest_signing": True},
+        ]
+        invalid_contracts.extend(
+            {key: value for key, value in expected.items() if key != missing}
+            for missing in expected
+        )
+        profiles.extend(self.program_profile | {"ark_signing": contract}
+                        for contract in invalid_contracts)
+        for profile in profiles:
+            response = self.signed_response(identity=dict(self.identity, signing=profile))
+            with self.subTest(profile=profile):
+                # Genuine evidence must not bless an unsupported contract.
+                with self.assertRaises(ValueError):
+                    self.verify(response)
+                # An equally malformed caller-supplied expectation cannot
+                # bypass validation through Python's numeric equality.
+                with self.assertRaises(ValueError):
+                    self.verify(response, program_profile=profile)
 
     def test_modified_cose_payload_is_rejected(self):
         response = self.signed_response()

@@ -1,6 +1,6 @@
 Registered evaluator: pay-at-least/v1
 
-Source repository: https://github.com/stutxo/sapio
+Source repository: https://github.com/sapio-lang/sapio
 Revision: c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
 Artifact path: evaluators/artifacts/pay_at_least.wasm
 Source path: evaluators/pay-at-least/src/lib.rs

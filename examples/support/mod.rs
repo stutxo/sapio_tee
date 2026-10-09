@@ -86,6 +86,9 @@ pub fn load_identity(options: &Options) -> Result<Identity> {
         identity.protocol == IDENTITY_PROTOCOL,
         "unsupported identity protocol"
     );
+    // Compare the complete measured profile, including the nested Ark signing
+    // protocol and session limits. ProgramProfile rejects missing/unknown fields;
+    // do not accept a legacy profile or compare only the evaluator registry.
     ensure!(
         identity.signing == program_profile(),
         "identity has an unexpected program profile"

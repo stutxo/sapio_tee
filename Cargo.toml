@@ -14,13 +14,16 @@ local-dev = []
 
 [dependencies]
 anyhow = "1"
+ark-lib = { git = "https://github.com/stutxo/saplingos", rev = "c3d1981e7d770addbb6f6ad632390c1a20470bc0" }
 aws-nitro-enclaves-nsm-api = "0.4"
 aws-sdk-kms = "1"
 axum = "0.8"
 base64 = "0.22"
 bitcoin = { version = "=0.32.102", features = ["serde", "rand"] }
-emulator_connect = { package = "ctv_emulators", git = "https://github.com/stutxo/sapio", rev = "bb5d57660e90878d0d75e60eb260eee97ef2574b" }
-sapio-base = { git = "https://github.com/stutxo/sapio", rev = "bb5d57660e90878d0d75e60eb260eee97ef2574b" }
+emulator_connect = { package = "ctv_emulators", git = "https://github.com/sapio-lang/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-base = { git = "https://github.com/sapio-lang/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-psbt = { git = "https://github.com/sapio-lang/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
+sapio-wasm = { git = "https://github.com/sapio-lang/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1", features = ["host"] }
 hex = "0.4"
 hkdf = "0.12"
 p256 = { version = "0.13", features = ["pkcs8"] }
@@ -29,11 +32,14 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time"] }
 tower = { version = "0.5", features = ["limit", "load-shed"] }
+tower-http = { version = "0.6", features = ["cors"] }
+wasmer = "=6.1.0"
+wasmer-middlewares = "=6.1.0"
 zeroize = "1"
 
 [dev-dependencies]
 miniscript = { version = "=13.1.0", features = ["compiler", "serde"] }
-sapio = { git = "https://github.com/stutxo/sapio", rev = "bb5d57660e90878d0d75e60eb260eee97ef2574b" }
+sapio = { git = "https://github.com/sapio-lang/sapio", rev = "c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1" }
 wat = "=1.259.0"
 
 [patch.crates-io]

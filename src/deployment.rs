@@ -3,8 +3,18 @@
 use anyhow::Result;
 use bitcoin::bip32::Xpriv;
 use emulator_connect::program::{ProgramOracle, WasmEvaluator};
-use sapio_base::program::EvaluatorId;
+use sapio_base::program::{EvaluatorId, WasmVersion};
 use serde::{Deserialize, Serialize};
+
+use crate::ark_signer::{MAX_PENDING_SESSIONS, SESSION_LIFETIME_SECS};
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ArkSigningProfile {
+    pub protocol: String,
+    pub max_pending_sessions: usize,
+    pub session_lifetime_secs: u64,
+}
 
 pub const IDENTITY_PROTOCOL: &str = "sapio-tee/program-oracle/1";
 pub const MAX_CONNECTIONS: usize = 4;
@@ -12,6 +22,18 @@ pub const REQUEST_TIMEOUT_SECS: u64 = 30;
 pub const PAY_AT_LEAST_SELECTOR: &[u8] = b"pay-at-least/v1";
 /// Exact upstream artifact; provenance and digest are in evaluators/PROVENANCE.txt.
 pub const PAY_AT_LEAST_WASM: &[u8] = include_bytes!("../evaluators/pay_at_least.wasm");
+
+// One measured definition feeds the advertised profile and both execution
+// paths; neither service can inject a different runtime registry at setup.
+const REGISTERED: &[(&str, WasmVersion, &[u8])] = &[
+    ("pay-at-least/v1", WasmVersion::V1, PAY_AT_LEAST_WASM),
+];
+
+pub(crate) fn evaluators() -> Result<Vec<WasmEvaluator>> {
+    REGISTERED.iter().map(|(_, version, module)| {
+        Ok(WasmEvaluator::with_version(*version, module.to_vec())?)
+    }).collect()
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +58,7 @@ pub struct ProgramProfile {
     pub registered_evaluators: Vec<RegisteredEvaluator>,
     pub max_connections: usize,
     pub request_timeout_secs: u64,
+    pub ark_signing: ArkSigningProfile,
 }
 
 /// Produce public capabilities locally, without NSM, credentials, or a root key.
@@ -53,21 +76,28 @@ pub fn program_profile() -> ProgramProfile {
                 wasm_version: 2,
             },
         ],
-        registered_evaluators: vec![RegisteredEvaluator {
-            name: "pay-at-least/v1".into(),
-            id: EvaluatorId::for_wasm(PAY_AT_LEAST_WASM),
-            wasm_version: 1,
-        }],
+        registered_evaluators: REGISTERED.iter().map(|(name, version, module)| {
+            RegisteredEvaluator {
+                name: (*name).into(),
+                id: EvaluatorId::for_wasm_version(module, *version),
+                wasm_version: match version {
+                    WasmVersion::V1 => 1,
+                    WasmVersion::V2 => 2,
+                },
+            }
+        }).collect(),
         max_connections: MAX_CONNECTIONS,
         request_timeout_secs: REQUEST_TIMEOUT_SECS,
+        ark_signing: ArkSigningProfile {
+            protocol: ark::sapio::protocol::SIGNING_PROTOCOL.into(),
+            max_pending_sessions: MAX_PENDING_SESSIONS,
+            session_lifetime_secs: SESSION_LIFETIME_SECS,
+        },
     }
 }
 
 /// Fixed registry plus the upstream reserved inline WASM v1/v2 interpreters.
 /// Adding a registered interpreter is a source/image change, not a setup option.
 pub fn program_oracle(root: Xpriv) -> Result<ProgramOracle> {
-    Ok(ProgramOracle::new(
-        root,
-        vec![WasmEvaluator::new(PAY_AT_LEAST_WASM.to_vec())?],
-    )?)
+    Ok(ProgramOracle::new(root, evaluators()?)?)
 }

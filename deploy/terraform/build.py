@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the locked deployment artifacts for Terraform's external data source."""
+"""Build deployment artifacts from a reviewed standalone source snapshot."""
 
 import json
 import os
@@ -9,6 +9,9 @@ import struct
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from source_snapshot import verify_snapshot
 
 
 def run(command, repository):
@@ -24,13 +27,15 @@ def run(command, repository):
     ).stdout
 
 
-def build(repository, roots, package):
+def build(repository, roots, package, snapshot):
+    # Check self-source immediately before Nix imports it. Dependencies are public pins.
+    tee_source = verify_snapshot(snapshot)
     result = json.loads(run([
         "nix", "build",
         "--extra-experimental-features", "nix-command flakes",
-        "--no-update-lock-file", "--no-write-lock-file",
+        "--no-update-lock-file",
         "--json", "--out-link", str(roots / package),
-        f".#{package}",
+        f"path:{tee_source}#{package}",
     ], repository))
     if not isinstance(result, list) or len(result) != 1 or not isinstance(result[0], dict):
         raise ValueError(f"#{package}: Nix did not return exactly one build result")
@@ -103,14 +108,20 @@ def main():
         for name in ("flake.nix", "flake.lock"):
             if not (repository / name).is_file():
                 raise ValueError(f"repository_root must contain {name}")
+        # repository_root is an operational worktree and may contain Terraform
+        # state or credentials. Never pass it to Nix.
+        source = os.environ.get("TEE_SOURCE")
+        if not source:
+            raise ValueError("TEE_SOURCE must name a reviewed code-only snapshot; see USAGE.txt")
+        snapshot = verify_snapshot(source)
 
         root_directory = repository / ".local" / "terraform"
         root_directory.mkdir(parents=True, exist_ok=True)
         # Retain independent GC roots: a later plan must not unpin the immutable
         # store paths already recorded by an earlier plan or in Terraform state.
         roots = Path(tempfile.mkdtemp(prefix="build-", dir=root_directory))
-        eif_output = build(repository, roots, "eif")
-        runner_output = build(repository, roots, "enclaver")
+        eif_output = build(repository, roots, "eif", snapshot)
+        runner_output = build(repository, roots, "enclaver", snapshot)
         eif = artifact(eif_output, "sapio_tee.eif")
         runner = artifact(runner_output, "bin/enclaver")
         pcrs = measurements(artifact(eif_output, "pcr.json"))

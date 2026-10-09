@@ -39,19 +39,11 @@
           rustc = toolchain;
         };
         nativeTools = with pkgs; [ cmake pkg-config clang llvmPackages.llvm ];
-        sapioDependency = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).dependencies.emulator_connect;
-        sapioSource = builtins.fetchGit {
-          url = sapioDependency.git;
-          rev = sapioDependency.rev;
-          allRefs = true;
-        };
         app = rustPlatform.buildRustPackage {
           pname = "sapio-tee";
           version = "0.2.0";
-          src = pkgs.lib.fileset.toSource {
-            root = ./.;
-            fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ./evaluators ];
-          };
+          # Public dependencies are pinned in Cargo.lock; only this checkout is local.
+          src = self;
           cargoLock = {
             lockFile = ./Cargo.lock;
             # Every git source is fetched at its exact Cargo.lock commit; no
@@ -61,12 +53,7 @@
           buildNoDefaultFeatures = true;
           cargoBuildFlags = [ "--locked" "--bin" "sapio-tee" ];
           doCheck = false;
-          # Cargo vendoring splits workspace members into sibling directories.
-          # Sapio's include_bytes! also needs the tracked workspace WASM files.
-          prePatch = ''
-            mkdir -p "$cargoDepsCopy/evaluators"
-            cp -r ${sapioSource}/evaluators/artifacts "$cargoDepsCopy/evaluators/"
-          '';
+          # Registry and public git dependencies are supplied by cargoLock vendoring.
           nativeBuildInputs = nativeTools;
           # Wasmer's bindgen runs on the glibc build host, not in the enclave.
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";

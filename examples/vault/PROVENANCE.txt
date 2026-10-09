@@ -3,14 +3,14 @@ Safe-withdrawal vault: inline v1 example
 Sources and licensing
 ---------------------
 guest.rs is an unmodified, byte-for-byte copy of:
-  Repository: https://github.com/stutxo/sapio
+  Repository: https://github.com/sapio-lang/sapio
   Revision: c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1
   Path: evaluators/common.rs
-  Source: https://github.com/stutxo/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/evaluators/common.rs
+  Source: https://github.com/sapio-lang/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/evaluators/common.rs
   SHA-256: c923aa67fef39e7610c8e02386af19d8de8bf07d6b8fd6de80f856b7ead00653
   License: Mozilla Public License 2.0 (MPL-2.0)
   Upstream copyright: Copyright 2021 Judica, Inc
-  License text: https://github.com/stutxo/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/LICENSE
+  License text: https://github.com/sapio-lang/sapio/blob/c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1/LICENSE
   License specification: https://www.mozilla.org/MPL/2.0/
 
 The copied source remains governed by MPL-2.0. Its source is distributed next
@@ -52,9 +52,10 @@ synthetic funding only and does not broadcast.
 
 Build and byte verification
 ---------------------------
-Run from the repository root, using the pinned Nix development shell:
-  nix develop --no-update-lock-file --command bash examples/vault/build.sh --write
-  nix develop --no-update-lock-file --command bash examples/vault/build.sh --check
+Run from the repository root after selecting TEE_FLAKE as described in USAGE.txt
+(public-only checkout, or positively reviewed self-source snapshot):
+  nix develop --no-update-lock-file "$TEE_FLAKE" --command bash examples/vault/build.sh --write
+  nix develop --no-update-lock-file "$TEE_FLAKE" --command bash examples/vault/build.sh --check
 Omitting the option means --check. Use --write only for an intentional artifact
 update. --check builds into a temporary directory and compares with vault.wasm;
 a mismatch or missing artifact fails, and never updates the committed file.

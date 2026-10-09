@@ -11,12 +11,12 @@ fi
 # Use the repository's Nix-pinned compiler from PATH, not a rustup override.
 if ! compiler_version="$(rustc --version 2>/dev/null)"; then
     echo "rustc 1.98.1 with wasm32-unknown-unknown is required on PATH." >&2
-    echo "From the repository root: nix develop --command bash examples/vault/build.sh $mode" >&2
+    echo "Use the explicit Nix source-input setup in USAGE.txt, then run examples/vault/build.sh $mode in that shell." >&2
     exit 1
 fi
 if [[ "$compiler_version" != "rustc 1.98.1 "* ]]; then
     echo "Expected rustc 1.98.1; found: $compiler_version" >&2
-    echo "From the repository root: nix develop --command bash examples/vault/build.sh $mode" >&2
+    echo "Use the explicit Nix source-input setup in USAGE.txt, then run examples/vault/build.sh $mode in that shell." >&2
     exit 1
 fi
 

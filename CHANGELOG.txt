@@ -1,9 +1,35 @@
 Unreleased
 
-- Pin Sapio to bb5d57660e90878d0d75e60eb260eee97ef2574b: double the
-  module/program byte limit to 131,072 and instance fuel to 200,000,000.
-  Parameter, witness, memory, table, compilation-slot and transport limits,
-  instruction/crypto costs, evaluator ABIs and key derivation are unchanged.
+- Add generic Ark nested signing with C = sorted KeyAgg(U, S), where S is
+  derived from the exact Sapio program instance. Program evaluation and S
+  remain inside the enclave; captaind keeps its native C+A policy. Recovery
+  spends must satisfy the same program, with no raw-digest or recovery bypass.
+- Bind the one-use Ark signing protocol and session limits into the attested
+  program profile. Consume nonces before validating finish requests, reject
+  replay, and expose credential-free browser CORS only on the signing routes.
+- Build standalone from public locked dependencies: pin unmodified
+  sapio-lang/sapio at c8f4e63123e724dc1144075af8ac0dbd3cf4e0b1 and the
+  stutxo/saplingos Ark library at its exact manifest/lock revision. Remove
+  sibling path dependencies and flake source overrides; keep the production
+  aarch64-musl build free of local-dev.
+- Keep Ark authorization in a TEE-local bounded adapter backed by upstream
+  Sapio WASM host APIs and metadata. Authenticate the original spend and exact
+  DEFAULT signature hash before evaluating the committed program and releasing
+  any signing nonce; preserve inline v1/v2 and registered evaluator semantics.
+- Return to the original Sapio limits: 65,536 program bytes and 100,000,000
+  shared execution/crypto fuel points. This supersedes the fork-only increase
+  below. Larger programs or executions now fail closed; existing deployments
+  do not change until an operator admits and deploys a new image.
+- Require a reviewed, hash-verified TEE self-source snapshot before Nix imports
+  a live/private worktree. Public dependencies need no local source snapshots;
+  deployment still refuses raw worktrees and verifies self-source before each
+  import. Retain the positive content-review requirement and rejection tests.
+- Ignore nested Rust target directories without removing experiment files.
+
+- Previously raise Sapio limits through fork revision
+  bb5d57660e90878d0d75e60eb260eee97ef2574b: 131,072 program bytes and
+  200,000,000 fuel points. Parameters and witnesses remained 65,536 bytes.
+  The unchanged-upstream cutover above replaces those fork-specific limits.
 
 - Add a BIP-446 OP_TEMPLATEHASH emulation example: an inline v1 predicate
   that recomputes the BIP-446 template hash (nVersion, nLockTime,
