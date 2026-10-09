@@ -1,5 +1,9 @@
 Unreleased
 
+- Fix the production Nix build of pinned upstream Sapio. Keep the vendored
+  sapio-base source at its original workspace location so its embedded CTV,
+  TemplateHash and template-authorization artifacts remain available.
+  Do not patch Sapio source or substitute evaluator bytes.
 - Add generic Ark nested signing with C = sorted KeyAgg(U, S), where S is
   derived from the exact Sapio program instance. Program evaluation and S
   remain inside the enclave; captaind keeps its native C+A policy. Recovery

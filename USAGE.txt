@@ -155,7 +155,14 @@ closure; do not strip that
 closure (the supervisor startup script references its packaged interpreter).
 The pinned Go init's CGO_ENABLED is moved into modern buildGoModule's env set.
 Sapio's embedded evaluator artifacts come from its pinned public git source.
-Neither adaptation substitutes the signer or attesting proxy.
+Nix normally vendors each crate without its workspace siblings. The application
+package links the vendored sapio-base source directory to that same upstream
+tree, so its relative include_bytes! paths still reach the CTV, TemplateHash and
+template-authorization artifacts. The source and evaluator bytes are unchanged;
+the manifest supplies the git pin and Cargo.lock supplies the crate version.
+Check this layout with nix build "$TEE_FLAKE#app"; a native Cargo check alone
+does not exercise Nix vendoring. These adaptations do not substitute the signer
+or attesting proxy.
 The pinned aarch64-musl parent runner is a standalone static executable; it
 has no ELF interpreter, shared-library dependencies, or Nix store references.
 Copy bin/enclaver and the standalone EIF directly; the parent does not need

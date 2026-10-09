@@ -39,6 +39,16 @@
           rustc = toolchain;
         };
         nativeTools = with pkgs; [ cmake pkg-config clang llvmPackages.llvm ];
+        sapioDependency = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).dependencies.sapio-base;
+        sapioSource = builtins.fetchGit {
+          url = sapioDependency.git;
+          rev = sapioDependency.rev;
+          allRefs = true;
+          submodules = true;
+        };
+        sapioBase = builtins.head (builtins.filter
+          (package: package.name == "sapio-base")
+          (builtins.fromTOML (builtins.readFile ./Cargo.lock)).package);
         app = rustPlatform.buildRustPackage {
           pname = "sapio-tee";
           version = "0.2.0";
@@ -58,6 +68,15 @@
           # Wasmer's bindgen runs on the glibc build host, not in the enclave.
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
           RUSTFLAGS = "-C target-feature=+crt-static";
+          # importCargoLock copies each crate without its workspace siblings.
+          # Keep the upstream src tree at its original location so its relative
+          # include_bytes! paths resolve to the exact pinned evaluator artifacts.
+          # This changes neither Sapio source nor the vendored Cargo manifest.
+          postPatch = ''
+            crate="$cargoDepsCopy/${sapioBase.name}-${sapioBase.version}"
+            rm -r "$crate/src"
+            ln -s ${sapioSource}/sapio-base/src "$crate/src"
+          '';
           postInstall = ''
             cp -L "$out/bin/sapio-tee" "$out/bin/entrypoint"
           '';
