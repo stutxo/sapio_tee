@@ -811,6 +811,70 @@ mod tests {
     }
 
     #[test]
+    fn session_capacity_preserves_live_sessions_and_reuses_released_slots() -> Result<()> {
+        let signer = signer();
+        let fixture = Fixture::template(true);
+        let mut sessions: Vec<_> = (0..MAX_PENDING_SESSIONS)
+            .map(|_| fixture.prepare(&signer)).collect();
+        assert!(signer.prepare(fixture.request().0).is_err());
+
+        let cancelled = sessions.pop().unwrap();
+        signer.cancel(CancelRequest {
+            protocol: SIGNING_PROTOCOL.into(), session: cancelled.finish.session,
+        }).unwrap();
+        let replacement = fixture.prepare(&signer);
+        assert!(signer.finish(cancelled.finish).is_err());
+        assert!(signer.prepare(fixture.request().0).is_err());
+
+        let expired = sessions.pop().unwrap();
+        signer.pending.lock().map_err(|_| anyhow!("signer state unavailable"))?
+            .get_mut(&expired.finish.session).unwrap().expires =
+            Instant::now() - Duration::from_secs(1);
+        let recovered = fixture.prepare(&signer);
+        assert!(signer.finish(expired.finish).is_err());
+        assert!(signer.prepare(fixture.request().0).is_err());
+
+        // Rejected requests and slot reuse must not evict an older live nonce.
+        let retained = sessions.into_iter().next().unwrap();
+        for prepared in [retained, replacement, recovered] {
+            let response = signer.finish(prepared.finish.clone()).unwrap();
+            prepared.complete(&fixture, response);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_finish_and_cancel_have_one_terminal_winner() {
+        let signer = signer();
+        let fixture = Fixture::template(false);
+        let prepared = fixture.prepare(&signer);
+        let retry = prepared.finish.clone();
+        let cancel = CancelRequest {
+            protocol: SIGNING_PROTOCOL.into(), session: retry.session,
+        };
+        let finish_request = retry.clone();
+        let cancel_request = cancel.clone();
+        let barrier = Barrier::new(2);
+        let (finished, cancelled) = thread::scope(|scope| {
+            let finish = scope.spawn(|| {
+                barrier.wait();
+                signer.finish(finish_request)
+            });
+            let cancel = scope.spawn(|| {
+                barrier.wait();
+                signer.cancel(cancel_request)
+            });
+            (finish.join().unwrap(), cancel.join().unwrap())
+        });
+        assert_ne!(finished.is_ok(), cancelled.is_ok());
+        if let Ok(response) = finished {
+            prepared.complete(&fixture, response);
+        }
+        assert!(signer.finish(retry).is_err());
+        assert!(signer.cancel(cancel).is_err());
+    }
+
+    #[test]
     fn concurrent_finish_releases_exactly_one_valid_share() {
         let signer = signer();
         let fixture = Fixture::template(false);

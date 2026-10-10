@@ -255,6 +255,37 @@ class AttestationVerification(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 self.verify(response, **overrides)
 
+    def test_signed_nonce_length_boundaries(self):
+        for length in (15, 16, 64, 65):
+            nonce = bytes(range(length))
+            document = self.document() | {"nonce": nonce}
+            response = self.signed_response(document)
+            with self.subTest(length=length):
+                if length in (16, 64):
+                    self.assertEqual(self.verify(response, nonce=nonce), self.identity)
+                else:
+                    with self.assertRaises(ValueError):
+                        self.verify(response, nonce=nonce)
+
+    def test_signed_timestamp_acceptance_boundaries(self):
+        now_ms = int(self.now.timestamp() * 1000)
+        for offset in (-300001, -300000, 5000, 5001):
+            document = self.document() | {"timestamp": now_ms + offset}
+            response = self.signed_response(document)
+            with self.subTest(offset=offset):
+                if offset in (-300000, 5000):
+                    self.assertEqual(self.verify(response, now_ms=now_ms), self.identity)
+                else:
+                    with self.assertRaises(ValueError):
+                        self.verify(response, now_ms=now_ms)
+
+    def test_noninteger_signed_timestamps_are_rejected(self):
+        now_ms = int(self.now.timestamp() * 1000)
+        for timestamp in (float(now_ms), str(now_ms), True, None):
+            document = self.document() | {"timestamp": timestamp}
+            with self.subTest(timestamp=timestamp), self.assertRaises(ValueError):
+                self.verify(self.signed_response(document), now_ms=now_ms)
+
     def test_signed_stale_document_is_rejected(self):
         document = self.document()
         document["timestamp"] -= 301000

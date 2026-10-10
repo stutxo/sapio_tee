@@ -173,6 +173,19 @@ CI runs locked Rust tests, evaluator artifact checks, the local signing protocol
 and the aarch64 image build from a standalone public checkout. Historical CI and
 Nitro evidence does not verify a newly changed image.
 
+Local test coverage
+-------------------
+With the Nix development environment and verifier dependencies available, run:
+
+  cargo test --locked --offline --lib --bin sapio-tee --features local-dev
+  python3 -m unittest discover -s tests -v
+
+The Rust tests check program refusal, transaction binding, session replay,
+cancellation, expiry, capacity and concurrent finish/cancel requests.
+The Python tests check attestation and source-snapshot boundaries, including
+nonce lengths and exact freshness limits. These local fixtures use dummy keys;
+they do not prove Nitro hardware security.
+
 One-apply Terraform test deployment
 -----------------------------------
 After the initial Terraform init and configuration, terraform apply performs:
