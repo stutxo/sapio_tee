@@ -71,8 +71,12 @@ jobs:
       - name: Restore and cache the Nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # Contributor-controlled pull_request code consumes this cache. Keep
+          # PR-saved stores in their own key namespace so shared fallback keys can
+          # never flow a PR-populated store into push or manual runs, independent
+          # of the platform's branch scoping of saved caches.
+          primary-key: nix-${{ runner.os }}-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.event_name == 'pull_request' && 'pr-' || '' }}
           gc-max-store-size-linux: 2G
       - name: Evaluate locked flake
         run: nix flake check --no-build --no-update-lock-file
@@ -81,9 +85,13 @@ jobs:
       - name: Build measured enclave image
         run: nix build --no-update-lock-file .#eif .#enclave-kernel --out-link result-eif
       - name: Preserve actual build measurements
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v5
         with:
-          name: sapio-tee-aarch64-eif
+          # The artifact name records the producing event so a measurement image
+          # built from contributor-controlled code can never present as a
+          # trusted-branch build output.
+          name: sapio-tee-aarch64-eif-${{ github.event_name }}
           path: |
             result-eif/*.eif
             result-eif/pcr.json
