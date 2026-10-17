@@ -221,6 +221,46 @@ async fn ark_cancel(
         .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))
 }
 
+/// Compose the public HTTP router. Every admitted request — header dispatch,
+/// body extraction and handler work — must complete within `request_deadline`,
+/// which runs inside the per-route concurrency permit: a stalled or trickled
+/// body is dropped with 408 and its admission slot is released, so cheap
+/// incomplete requests cannot pin an entire route. This mirrors the TCP
+/// signer's REQUEST_TIMEOUT_SECS I/O deadline.
+fn build_router(state: Arc<AppState>, request_deadline: std::time::Duration) -> Router {
+    // Only the credential-free signing protocol is callable by browser wallets.
+    // Setup and attestation retain their existing, non-CORS administrative surface.
+    let ark_routes = Router::new()
+        .route("/prepare", post(ark_prepare).layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES)))
+        .route("/finish", post(ark_finish))
+        .route("/cancel", post(ark_cancel))
+        .layer(CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods([Method::POST])
+            .allow_headers([CONTENT_TYPE]));
+    Router::new()
+        .route("/health", get(health))
+        .route("/setup", post(setup))
+        .route("/public-key", get(public_key))
+        .route("/attestation", post(attestation))
+        .nest("/ark", ark_routes)
+        .layer(DefaultBodyLimit::max(4096))
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|error: BoxError| async move {
+                    if error.is::<tower::timeout::error::Elapsed>() {
+                        (StatusCode::REQUEST_TIMEOUT, "request deadline exceeded")
+                    } else {
+                        (StatusCode::SERVICE_UNAVAILABLE, "API capacity exceeded")
+                    }
+                }))
+                .layer(tower::timeout::TimeoutLayer::new(request_deadline))
+                .load_shed()
+                .concurrency_limit(16),
+        )
+        .with_state(state)
+}
+
 pub async fn run(nsm: Option<Nsm>) -> Result<()> {
     let (work, mut jobs) = mpsc::channel::<SignerJob>(1);
     let state = Arc::new(AppState {
@@ -243,32 +283,10 @@ pub async fn run(nsm: Option<Nsm>) -> Result<()> {
         eprintln!("WARNING: local-dev, ephemeral regtest key; NO enclave security or attestation");
     }
 
-    // Only the credential-free signing protocol is callable by browser wallets.
-    // Setup and attestation retain their existing, non-CORS administrative surface.
-    let ark_routes = Router::new()
-        .route("/prepare", post(ark_prepare).layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES)))
-        .route("/finish", post(ark_finish))
-        .route("/cancel", post(ark_cancel))
-        .layer(CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([Method::POST])
-            .allow_headers([CONTENT_TYPE]));
-    let router = Router::new()
-        .route("/health", get(health))
-        .route("/setup", post(setup))
-        .route("/public-key", get(public_key))
-        .route("/attestation", post(attestation))
-        .nest("/ark", ark_routes)
-        .layer(DefaultBodyLimit::max(4096))
-        .layer(
-            ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(|_: BoxError| async {
-                    (StatusCode::SERVICE_UNAVAILABLE, "API capacity exceeded")
-                }))
-                .load_shed()
-                .concurrency_limit(16),
-        )
-        .with_state(state);
+    let router = build_router(
+        state,
+        std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+    );
     let listener = TcpListener::bind(API_ADDRESS).await?;
     eprintln!("sapio-tee API listening on {API_ADDRESS}; ProgramOracle port {SIGNER_ADDRESS}");
     let signer = async move {
@@ -300,4 +318,70 @@ async fn shutdown() -> Result<()> {
         _ = terminate.recv() => {},
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Regression for the body-trickle denial of service: an admitted request whose
+    /// body never completes must be rejected at the request deadline with 408, and
+    /// the route must stay available to complete requests meanwhile.
+    #[tokio::test]
+    async fn stalled_body_is_rejected_at_the_request_deadline() -> Result<()> {
+        let (work, _jobs) = mpsc::channel::<SignerJob>(1);
+        let state = Arc::new(AppState {
+            identity: OnceLock::new(),
+            ark_signer: OnceLock::new(),
+            ark_admission: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            setup_gate: Mutex::new(()),
+            work,
+            nsm: None,
+        });
+        let router = build_router(state, std::time::Duration::from_millis(100));
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+
+        // Complete headers declaring a 1024-byte body, then a single byte, held open.
+        let mut stalled = tokio::net::TcpStream::connect(address).await?;
+        stalled
+            .write_all(b"POST /setup HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1024\r\n\r\n{")
+            .await?;
+
+        let mut response = vec![0u8; 4096];
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            stalled.read(&mut response),
+        )
+        .await
+        .context("no response to a stalled body within 5s")??;
+        let head = String::from_utf8_lossy(&response[..read]).into_owned();
+        assert!(
+            head.starts_with("HTTP/1.1 408"),
+            "stalled body must be rejected at the deadline, got: {head:?}"
+        );
+        assert!(head.contains("request deadline exceeded"), "{head:?}");
+
+        // A complete request on the same served router is unaffected.
+        let mut live = tokio::net::TcpStream::connect(address).await?;
+        live.write_all(
+            b"POST /setup HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+        )
+        .await?;
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            live.read(&mut response),
+        )
+        .await
+        .context("no response to a complete request")??;
+        let head = String::from_utf8_lossy(&response[..read]).into_owned();
+        assert!(head.starts_with("HTTP/1.1 "), "{head:?}");
+        assert!(!head.starts_with("HTTP/1.1 408"), "{head:?}");
+        assert!(!head.starts_with("HTTP/1.1 503"), "{head:?}");
+
+        server.abort();
+        Ok(())
+    }
 }
