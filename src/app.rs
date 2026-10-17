@@ -225,8 +225,14 @@ async fn ark_cancel(
 /// body extraction and handler work — must complete within `request_deadline`,
 /// which runs inside the per-route concurrency permit: a stalled or trickled
 /// body is dropped with 408 and its admission slot is released, so cheap
-/// incomplete requests cannot pin an entire route. This mirrors the TCP
-/// signer's REQUEST_TIMEOUT_SECS I/O deadline.
+/// incomplete requests cannot pin an entire route.
+///
+/// The deadline races rather than cancels handler work: an in-flight
+/// /ark/prepare evaluation continues server-side even after the client is
+/// answered 408, and a session prepared after the deadline is retained until
+/// its normal expiry. Native compilation stays un-preemptible here, exactly as
+/// with the TCP signer's REQUEST_TIMEOUT_SECS I/O deadline (documented in the
+/// profile: not a hard CPU deadline).
 fn build_router(state: Arc<AppState>, request_deadline: std::time::Duration) -> Router {
     // Only the credential-free signing protocol is callable by browser wallets.
     // Setup and attestation retain their existing, non-CORS administrative surface.
@@ -350,14 +356,22 @@ mod tests {
             .write_all(b"POST /setup HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1024\r\n\r\n{")
             .await?;
 
-        let mut response = vec![0u8; 4096];
-        let read = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            stalled.read(&mut response),
-        )
-        .await
-        .context("no response to a stalled body within 5s")??;
-        let head = String::from_utf8_lossy(&response[..read]).into_owned();
+        let mut response = Vec::new();
+        let outer_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut chunk = [0u8; 4096];
+            match tokio::time::timeout_at(outer_deadline, stalled.read(&mut chunk)).await {
+                Ok(Ok(0)) => break,
+                Ok(Ok(count)) => response.extend_from_slice(&chunk[..count]),
+                Ok(Err(error)) => return Err(error.into()),
+                Err(_) => bail!("no response to a stalled body within 5s"),
+            }
+            let text = String::from_utf8_lossy(&response);
+            if text.contains("\r\n\r\n") && text.contains("request deadline exceeded") {
+                break;
+            }
+        }
+        let head = String::from_utf8_lossy(&response).into_owned();
         assert!(
             head.starts_with("HTTP/1.1 408"),
             "stalled body must be rejected at the deadline, got: {head:?}"
@@ -370,13 +384,15 @@ mod tests {
             b"POST /setup HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
         )
         .await?;
+        response.clear();
         let read = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            live.read(&mut response),
+            live.read_buf(&mut response),
         )
         .await
         .context("no response to a complete request")??;
-        let head = String::from_utf8_lossy(&response[..read]).into_owned();
+        assert!(read > 0);
+        let head = String::from_utf8_lossy(&response).into_owned();
         assert!(head.starts_with("HTTP/1.1 "), "{head:?}");
         assert!(!head.starts_with("HTTP/1.1 408"), "{head:?}");
         assert!(!head.starts_with("HTTP/1.1 503"), "{head:?}");

@@ -234,10 +234,13 @@ The HTTP API listens on enclave loopback port 8000; the parent forwards it.
 | `POST /ark/cancel` | Discard an unused session |
 
 Every admitted HTTP request — header dispatch, body read and handler work — must
-complete within 30 seconds, matching the ProgramOracle request I/O timeout.
-Stalled or trickled requests are answered `408 request deadline exceeded` and
-release their admission slot; per-route admission admits 16 concurrent requests
-and sheds excess load with `503`.
+complete within 30 seconds. Stalled or trickled requests are answered
+`408 request deadline exceeded` and release their admission slot; per-route
+admission admits 16 concurrent requests and sheds excess load with `503`.
+The deadline races handler work rather than cancelling it: an evaluation that
+overruns keeps running server-side (native compilation is not preemptible,
+same as the ProgramOracle request I/O timeout), and a session prepared after
+a timed-out prepare is retained until its normal expiry.
 
 The ProgramOracle TCP signer starts on port 8367 only after successful initialization. Its public identity protocol is `sapio-tee/program-oracle/1`. The profile binds `SignProgramV1`, inline v1/v2, the exact registered interpreter ID, four admitted connections, and a 30-second request I/O timeout. This is not a hard CPU deadline for native WASM compilation. See [USAGE.txt](USAGE.txt) for the full profile, `ProgramSigningRequest` shape, and commands.
 
