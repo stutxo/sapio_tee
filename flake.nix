@@ -18,11 +18,13 @@
   };
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils, enclaver }:
-    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (system:
       let
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
-        # Only the libc target changes: compiler/build scripts run on native x86_64.
+        # Only the libc target changes: compiler/build scripts run on the
+        # evaluation host (x86_64 build/CI hosts; aarch64 in the CI
+        # tests-aarch64 lane).
         # The enclave image targets aarch64 (Graviton Nitro Enclaves); everything
         # inside the EIF is aarch64-unknown-linux-musl, cross-compiled from this host.
         pkgsMusl = import nixpkgs {
