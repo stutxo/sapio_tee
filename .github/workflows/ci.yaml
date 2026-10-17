@@ -12,9 +12,9 @@ jobs:
   rust:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Reclaim runner disk for the enclave image build
         run: |
           sudo apt-get clean
@@ -64,21 +64,20 @@ jobs:
             2>/dev/null || true
           sudo docker image prune -af >/dev/null 2>&1 || true
           df -h /
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
       - name: Restore and cache the Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           # Contributor-controlled pull_request code consumes this cache. PR runs
-          # use a namespace outside the trusted prefix tree (nix-pr-<OS>-*), so the
-          # trusted fallback prefix nix-<OS>- can never prefix-match a PR-saved
-          # key even if the platform's ref scoping of saved caches ever made one
-          # visible to a push or manual run; PR runs likewise never read the
-          # trusted namespace.
-          primary-key: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
-          restore-prefixes-first-match: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-
+          # use a namespace outside the trusted prefix tree (nix-pr-<OS>-<arch>-*),
+          # so the trusted fallback prefix can never prefix-match a PR-saved key,
+          # independent of the platform's ref scoping of saved caches. Keys carry
+          # the runner architecture so arm64 and x64 stores never share a key.
+          primary-key: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
+          restore-prefixes-first-match: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ runner.arch }}-
           gc-max-store-size-linux: 2G
       - name: Evaluate locked flake
         run: nix flake check --no-build --no-update-lock-file
@@ -88,7 +87,7 @@ jobs:
         run: nix build --no-update-lock-file .#eif .#enclave-kernel --out-link result-eif
       - name: Preserve actual build measurements
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           # The artifact name records the producing event so a measurement image
           # built from contributor-controlled code can never present as a
@@ -98,3 +97,45 @@ jobs:
             result-eif/*.eif
             result-eif/pcr.json
           if-no-files-found: error
+
+  advisories:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Every workflow action is commit-SHA pinned
+        run: python3 scripts/check_pinned_actions.py
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Audit pinned Rust dependencies against the RustSec database
+        run: |
+          cargo install cargo-audit --locked --version 0.22.0
+          cargo audit
+      - name: Audit the hash-pinned verifier closure against PyPA advisories
+        run: |
+          python3 -m venv /tmp/pip-audit-env
+          /tmp/pip-audit-env/bin/pip install --quiet pip-audit
+          /tmp/pip-audit-env/bin/pip-audit --require-hashes -r requirements-verifier.txt
+
+  # x86_64 review cannot observe aarch64 emitted code (bounds checks, injected
+  # metering, trap delivery). This lane runs the same locked test suite — which
+  # covers exactly those paths in the WASM evaluator — on a native arm64 runner.
+  tests-aarch64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Restore and cache the Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-tests-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}
+          restore-prefixes-first-match: nix-tests-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ runner.arch }}-
+          gc-max-store-size-linux: 2G
+      - name: Run the full test suite on native aarch64
+        run: |
+          nix develop --no-update-lock-file -c cargo check --locked --all-targets --no-default-features
+          nix develop --no-update-lock-file -c cargo test --locked --no-default-features
+          nix develop --no-update-lock-file -c cargo test --locked --features local-dev

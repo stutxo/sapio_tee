@@ -201,3 +201,11 @@ https://docs.aws.amazon.com/kms/latest/developerguide/conditions-attestation.htm
 https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-overview.html
 https://docs.aws.amazon.com/kms/latest/APIReference/API_DeriveSharedSecret.html
 https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html
+
+Continuous gates in CI (.github/workflows/ci.yaml): all workflow actions are
+pinned to commit SHAs and linted (scripts/check_pinned_actions.py); the locked
+Rust and verifier Python dependency closures are audited against RustSec and
+PyPA advisories on every change, with each unreachable-by-design exception
+justified in .cargo/audit.toml; and the locked test suite also runs on a native
+aarch64 lane because production images target aarch64 (Graviton Nitro) while
+development hosts are x86_64.

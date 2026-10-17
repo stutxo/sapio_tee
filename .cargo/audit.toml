@@ -1,0 +1,36 @@
+# cargo-audit policy. Every ignored advisory is unreachable in this codebase as
+# deployed; each entry names the code-level reason. Re-evaluate this list on any
+# dependency or feature change (run `cargo audit` after commenting one out).
+#
+# Do not ignore advisories reachable through the WASM evaluator, the attestation
+# verifier, or the HTTP/TCP listeners.
+[advisories]
+ignore = [
+    # aws-sdk-kms smithy chain retains rustls 0.21 and h2 0.3 (upstream:
+    # aws-sdk-kms 1.120 -> aws-smithy-http-client 1.4.2). Not reachable: the
+    # only AWS client in this repo talks to the parent-local KMS proxy over
+    # plaintext http://127.0.0.1:9999 (src/keys.rs KMS_PROXY_ENDPOINT); no TLS
+    # session is ever established inside the enclave, and no HTTP/2 server or
+    # untrusted peer terminates at this process.
+    "RUSTSEC-2026-0346", # rustls Debug impls expose TLS secrets
+    "RUSTSEC-2026-0349", # rustls ServerHello downgrade to classical key exchange
+    "RUSTSEC-2026-0258", # h2 0.3 unbounded empty DATA frames
+    # rustls-webpki 0.101.7 rides with that same unused rustls 0.21 chain
+    # (cert validation code; no TLS handshake ever happens here).
+    "RUSTSEC-2026-0098", # URI name constraints incorrectly accepted
+    "RUSTSEC-2026-0099", # wildcard name constraints accepted
+    "RUSTSEC-2026-0104", # reachable panic in CRL parsing
+    # RUSTSEC-2026-0344 (ruzstd decompression bomb, via object 0.32.2 in
+    # wasmer-compiler): ruzstd decompresses zstd-compressed ELF sections. This
+    # service compiles caller WASM modules fresh from in-memory bytes
+    # (src/evaluator.rs Module::new) and never loads serialized native artifacts,
+    # so no decompression path is reachable. Revisit if artifact caching or
+    # Engine::deserialize is ever enabled.
+    "RUSTSEC-2026-0344",
+    # RUSTSEC-2026-0186 (memmap2 unchecked pointer offset, via shared-buffer in
+    # wasmer): file-backed shared buffers are used by wasmer's artifact/caching
+    # paths, which this service never enables (same reason as above). No fixed
+    # memmap2 release exists; upstream-adjacent mitigation is a wasmer upgrade.
+    # Revisit with the next wasmer version bump.
+    "RUSTSEC-2026-0186",
+]
