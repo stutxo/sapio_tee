@@ -6,8 +6,8 @@
 # verifier, or the HTTP/TCP listeners.
 [advisories]
 ignore = [
-    # aws-sdk-kms smithy chain retains rustls 0.21 and h2 0.3 (upstream:
-    # aws-sdk-kms 1.120 -> aws-smithy-http-client 1.4.2). Not reachable: the
+    # aws-sdk-kms smithy chain retains rustls 0.21 and h2 0.3 (observed at
+    # aws-sdk-kms 1.123.0 -> aws-smithy-http-client 1.5.0 in Cargo.lock). Not reachable: the
     # only AWS client in this repo talks to the parent-local KMS proxy over
     # plaintext http://127.0.0.1:9999 (src/keys.rs KMS_PROXY_ENDPOINT); no TLS
     # session is ever established inside the enclave, and no HTTP/2 server or

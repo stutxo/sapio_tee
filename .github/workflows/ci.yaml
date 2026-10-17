@@ -113,7 +113,8 @@ jobs:
       - name: Audit the hash-pinned verifier closure against PyPA advisories
         run: |
           python3 -m venv /tmp/pip-audit-env
-          /tmp/pip-audit-env/bin/pip install --quiet pip-audit
+          # Pinned like every other input to this gate.
+          /tmp/pip-audit-env/bin/pip install --quiet pip-audit==2.10.1
           /tmp/pip-audit-env/bin/pip-audit --require-hashes -r requirements-verifier.txt
 
   # x86_64 review cannot observe aarch64 emitted code (bounds checks, injected

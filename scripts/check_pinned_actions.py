@@ -19,6 +19,10 @@ def main() -> int:
         for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
             match = USES.match(line)
             if not match:
+                # Fail closed on any uses: shape the regex cannot parse rather
+                # than silently skipping it.
+                if "uses:" in line and not line.lstrip().startswith("#"):
+                    failures.append(f"{workflow}:{line_number}: unparsable uses: line {line.strip()!r}")
                 continue
             reference = match.group(1)
             if reference.startswith("./"):
