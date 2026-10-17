@@ -57,11 +57,14 @@ def validate_program_profile(profile):
     require(profile["protocol"] == "SignProgramV1", "unsupported program wire protocol")
     ark_signing = profile["ark_signing"]
     require(isinstance(ark_signing, dict) and set(ark_signing) == {
-        "protocol", "max_pending_sessions", "session_lifetime_secs",
+        "protocol", "max_pending_sessions", "max_sessions_per_user",
+        "session_lifetime_secs",
     }, "invalid Ark signing profile fields")
     require(ark_signing["protocol"] == "sapio-ark/nested-signing/1",
             "unsupported Ark signing protocol")
-    for field, expected in (("max_pending_sessions", 256), ("session_lifetime_secs", 120)):
+    for field, expected in (("max_pending_sessions", 256),
+                            ("max_sessions_per_user", 8),
+                            ("session_lifetime_secs", 120)):
         require(type(ark_signing[field]) is int and ark_signing[field] == expected,
                 f"unsupported Ark signing {field}")
     reserved = {"0" * 64: 1, "0" * 63 + "2": 2}

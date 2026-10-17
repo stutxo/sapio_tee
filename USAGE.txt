@@ -440,6 +440,7 @@ POST /setup and GET /public-key return the same object:
      "ark_signing":{
        "protocol":"sapio-ark/nested-signing/1",
        "max_pending_sessions":256,
+       "max_sessions_per_user":8,
        "session_lifetime_secs":120
      }
    }}

@@ -202,7 +202,8 @@ For a manual deployment, start the enclave using [`deploy/run-enclave.py`](deplo
 Build `result-app` with `nix build --no-update-lock-file "$TEE_FLAKE#app" --out-link result-app` first. The binary is aarch64: run this step on an aarch64 Linux host (e.g. the parent, or with qemu-user binfmt on the build machine). The command requires no NSM or AWS access. Pass `--program-profile expected-program-profile.json` to the verifier; never extract your expected profile from the host's response.
 
 The expected profile must include `ark_signing` with protocol
-`sapio-ark/nested-signing/1`, integer `max_pending_sessions: 256`, and integer
+`sapio-ark/nested-signing/1`, integer `max_pending_sessions: 256`, integer
+`max_sessions_per_user: 8`, and integer
 `session_lifetime_secs: 120`. The verifier rejects missing or extra fields,
 different protocols, and different limits. The example identity loader compares
 the complete profile to its own reviewed build, including this contract. The
@@ -249,7 +250,9 @@ There is no raw-digest spend endpoint or special recovery authorization.
 
 The user nonce is fixed before the TEE nonce is returned. Finishing consumes
 the nonce before validating peer data; replay, cancellation, expiry and
-process restart cannot reuse it. At most 256 sessions live for 120 seconds.
+process restart cannot reuse it. At most 256 sessions live for 120 seconds,
+and at most 8 concurrent sessions per wallet key, so no single caller can
+exhaust the shared preparation pool and deny it to other wallets.
 A lost signing response needs a fresh session, not a replay of a secret nonce.
 Only `/ark/*` permits credential-free browser CORS; setup and attestation do not.
 
