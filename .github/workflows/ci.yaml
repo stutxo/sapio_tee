@@ -71,12 +71,14 @@ jobs:
       - name: Restore and cache the Nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          # Contributor-controlled pull_request code consumes this cache. Keep
-          # PR-saved stores in their own key namespace so shared fallback keys can
-          # never flow a PR-populated store into push or manual runs, independent
-          # of the platform's branch scoping of saved caches.
-          primary-key: nix-${{ runner.os }}-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.event_name == 'pull_request' && 'pr-' || '' }}
+          # Contributor-controlled pull_request code consumes this cache. PR runs
+          # use a namespace outside the trusted prefix tree (nix-pr-<OS>-*), so the
+          # trusted fallback prefix nix-<OS>- can never prefix-match a PR-saved
+          # key even if the platform's ref scoping of saved caches ever made one
+          # visible to a push or manual run; PR runs likewise never read the
+          # trusted namespace.
+          primary-key: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'Cargo.lock', 'Cargo.toml', 'src/**', 'enclaver.yaml') }}
+          restore-prefixes-first-match: nix-${{ github.event_name == 'pull_request' && 'pr-' || '' }}${{ runner.os }}-
           gc-max-store-size-linux: 2G
       - name: Evaluate locked flake
         run: nix flake check --no-build --no-update-lock-file
