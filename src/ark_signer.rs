@@ -25,8 +25,12 @@ use std::time::{Duration, Instant};
 
 pub const MAX_PENDING_SESSIONS: usize = 256;
 pub const SESSION_LIFETIME_SECS: u64 = 120;
-/// Concurrent reservations allowed per wallet key, so one unauthenticated
-/// caller cannot monopolize the shared preparation pool.
+/// Concurrent reservations allowed per wallet key. Wallet keys are
+/// caller-generated, so this raises the cost of exhausting the shared pool
+/// (one slot-holder key admits at most this many slots) without eliminating
+/// it for a determined caller using many keys. Operators exposing /ark/*
+/// publicly should additionally front it with connection- or IP-level
+/// fairness.
 pub const MAX_SESSIONS_PER_USER: usize = 8;
 
 struct Pending {

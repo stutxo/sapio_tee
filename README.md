@@ -251,8 +251,10 @@ There is no raw-digest spend endpoint or special recovery authorization.
 The user nonce is fixed before the TEE nonce is returned. Finishing consumes
 the nonce before validating peer data; replay, cancellation, expiry and
 process restart cannot reuse it. At most 256 sessions live for 120 seconds,
-and at most 8 concurrent sessions per wallet key, so no single caller can
-exhaust the shared preparation pool and deny it to other wallets.
+and at most 8 concurrent sessions per wallet key. Wallet keys are
+caller-generated, so the per-wallet cap raises the cost of exhausting the
+shared pool rather than preventing it outright; deployments exposing `/ark/*`
+to untrusted callers should add connection- or IP-level fairness in front.
 A lost signing response needs a fresh session, not a replay of a secret nonce.
 Only `/ark/*` permits credential-free browser CORS; setup and attestation do not.
 
