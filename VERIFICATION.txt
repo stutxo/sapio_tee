@@ -462,7 +462,8 @@ CI (run 35451306747, ubuntu-24.04):
 - Rust contract checks, attestation fixtures, and the live signing protocol
   passed on the native x86_64 toolchain.
 - The aarch64 musl app, aarch64 parent runner, kernel, and measured EIF build
-  passed in CI; artifact sapio-tee-aarch64-eif uploaded.
+  passed in CI; artifact sapio-tee-aarch64-eif-<event> (e.g. -push) uploaded.
+  Pull-request runs do not publish EIF artifacts.
 - Reproducibility: the CI EIF is bit-identical to the local build and the
   CI pcr.json matches the local one exactly (deterministic across machines).
 
