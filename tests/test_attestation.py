@@ -100,6 +100,7 @@ class AttestationVerification(unittest.TestCase):
             "ark_signing": {
                 "protocol": "sapio-ark/nested-signing/1",
                 "max_pending_sessions": 256,
+                "max_sessions_per_user": 8,
                 "session_lifetime_secs": 120,
             },
         }
@@ -206,6 +207,11 @@ class AttestationVerification(unittest.TestCase):
             expected | {"max_pending_sessions": True},
             expected | {"max_pending_sessions": 256.0},
             expected | {"max_pending_sessions": "256"},
+            expected | {"max_sessions_per_user": 7},
+            expected | {"max_sessions_per_user": 9},
+            expected | {"max_sessions_per_user": True},
+            expected | {"max_sessions_per_user": 8.0},
+            expected | {"max_sessions_per_user": "8"},
             expected | {"session_lifetime_secs": 119},
             expected | {"session_lifetime_secs": 121},
             expected | {"session_lifetime_secs": False},

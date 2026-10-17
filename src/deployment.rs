@@ -6,13 +6,14 @@ use emulator_connect::program::{ProgramOracle, WasmEvaluator};
 use sapio_base::program::{EvaluatorId, WasmVersion};
 use serde::{Deserialize, Serialize};
 
-use crate::ark_signer::{MAX_PENDING_SESSIONS, SESSION_LIFETIME_SECS};
+use crate::ark_signer::{MAX_PENDING_SESSIONS, MAX_SESSIONS_PER_USER, SESSION_LIFETIME_SECS};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ArkSigningProfile {
     pub protocol: String,
     pub max_pending_sessions: usize,
+    pub max_sessions_per_user: usize,
     pub session_lifetime_secs: u64,
 }
 
@@ -91,6 +92,7 @@ pub fn program_profile() -> ProgramProfile {
         ark_signing: ArkSigningProfile {
             protocol: ark::sapio::protocol::SIGNING_PROTOCOL.into(),
             max_pending_sessions: MAX_PENDING_SESSIONS,
+            max_sessions_per_user: MAX_SESSIONS_PER_USER,
             session_lifetime_secs: SESSION_LIFETIME_SECS,
         },
     }

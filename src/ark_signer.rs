@@ -25,6 +25,13 @@ use std::time::{Duration, Instant};
 
 pub const MAX_PENDING_SESSIONS: usize = 256;
 pub const SESSION_LIFETIME_SECS: u64 = 120;
+/// Concurrent reservations allowed per wallet key. Wallet keys are
+/// caller-generated, so this raises the cost of exhausting the shared pool
+/// (one slot-holder key admits at most this many slots) without eliminating
+/// it for a determined caller using many keys. Operators exposing /ark/*
+/// publicly should additionally front it with connection- or IP-level
+/// fairness.
+pub const MAX_SESSIONS_PER_USER: usize = 8;
 
 struct Pending {
     program_id: ProgramId,
@@ -97,6 +104,15 @@ impl ArkSigner {
         let mut pending = self.pending.lock().map_err(|_| anyhow!("signer state unavailable"))?;
         pending.retain(|_, session| session.expires > now);
         ensure!(pending.len() < MAX_PENDING_SESSIONS, "signer session capacity exceeded");
+        // The first intent member is the requesting wallet key. Without a
+        // per-wallet bound, one caller's unfinished reservations — for example
+        // evaluation-free ownership proofs — could occupy the entire shared
+        // pool for its full retention window. The map holds at most
+        // MAX_PENDING_SESSIONS entries, so this scan stays negligible.
+        let held_by_user = pending.values()
+            .filter(|session| session.intent.members[0] == intent.members[0])
+            .count();
+        ensure!(held_by_user < MAX_SESSIONS_PER_USER, "per-wallet session capacity exceeded");
         let nonce = Nonce::new(intent, intent.members[1])?;
         let program_nonce = hex::encode(nonce.public().serialize());
         let mut bytes = [0u8; 32];
@@ -179,6 +195,9 @@ mod tests {
     };
     use std::sync::Barrier;
     use std::thread;
+
+    use ark::sapio::protocol::{OwnershipProof, OwnershipRequest};
+    use ark::{ProtocolEncoding, Vtxo, VtxoPolicy};
 
     // These are the existing source-built predicates, not approval callbacks.
     // Their source, ABI and binary provenance live beside the example artifacts.
@@ -814,11 +833,26 @@ mod tests {
     fn session_capacity_preserves_live_sessions_and_reuses_released_slots() -> Result<()> {
         let signer = signer();
         let fixture = Fixture::template(true);
-        let mut sessions: Vec<_> = (0..MAX_PENDING_SESSIONS)
-            .map(|_| fixture.prepare(&signer)).collect();
+
+        // The fixture wallet keeps a few live, finishable sessions — under its cap.
+        let mut live: Vec<_> = (0..3).map(|_| fixture.prepare(&signer)).collect();
+
+        // One wallet is capped at MAX_SESSIONS_PER_USER, so the global pool is
+        // filled with protocol-valid ownership reservations from distinct wallets.
+        let mut sessions = Vec::new();
+        let mut byte = 0x10u8;
+        while sessions.len() + live.len() < MAX_PENDING_SESSIONS {
+            let request = ownership_request(byte);
+            byte = byte.checked_add(1).unwrap();
+            for _ in 0..MAX_SESSIONS_PER_USER {
+                if sessions.len() + live.len() < MAX_PENDING_SESSIONS {
+                    sessions.push(signer.prepare(request.clone()).unwrap().session);
+                }
+            }
+        }
         assert!(signer.prepare(fixture.request().0).is_err());
 
-        let cancelled = sessions.pop().unwrap();
+        let cancelled = live.pop().unwrap();
         signer.cancel(CancelRequest {
             protocol: SIGNING_PROTOCOL.into(), session: cancelled.finish.session,
         }).unwrap();
@@ -828,15 +862,16 @@ mod tests {
 
         let expired = sessions.pop().unwrap();
         signer.pending.lock().map_err(|_| anyhow!("signer state unavailable"))?
-            .get_mut(&expired.finish.session).unwrap().expires =
+            .get_mut(&expired).unwrap().expires =
             Instant::now() - Duration::from_secs(1);
-        let recovered = fixture.prepare(&signer);
-        assert!(signer.finish(expired.finish).is_err());
+        let recovered = signer.prepare(ownership_request(byte)).unwrap();
         assert!(signer.prepare(fixture.request().0).is_err());
+        signer.cancel(CancelRequest {
+            protocol: SIGNING_PROTOCOL.into(), session: recovered.session,
+        }).unwrap();
 
         // Rejected requests and slot reuse must not evict an older live nonce.
-        let retained = sessions.into_iter().next().unwrap();
-        for prepared in [retained, replacement, recovered] {
+        for prepared in live.into_iter().chain([replacement]) {
             let response = signer.finish(prepared.finish.clone()).unwrap();
             prepared.complete(&fixture, response);
         }
@@ -1046,5 +1081,82 @@ mod tests {
             assert!(matches!(error.downcast_ref::<ProgramError>(), Some(ProgramError::Evaluation(_))));
         }
         Fixture::template(false).sign(&signer);
+    }
+
+    // A protocol-valid Ownership(Status) preparation reaches the reservation
+    // logic without any WASM evaluation, so it is the cheapest possible fill.
+    fn ownership_request(user: u8) -> PrepareRequest {
+        let user_key = key(user);
+        let program_key = ProgramKey {
+            program: payment_program(),
+            root: Xpub::from_priv(&ark::SECP, &root()),
+            user_pubkey: user_key.public_key(),
+        };
+        let point = OutPoint::new(Txid::from_byte_array([user; 32]), 0);
+        let owner = program_key.public_key().unwrap();
+        let bare = Vtxo::new(
+            point,
+            VtxoPolicy::new_pubkey(owner),
+            Amount::from_sat(FUNDING),
+            500.into(),
+            key(0x43).public_key(),
+            check_block_delta(EXIT_DELAY).unwrap(),
+            point,
+        );
+        let input: Vtxo = Vtxo::deserialize(&bare.serialize()).unwrap();
+        let action = SigningAction::Ownership {
+            request: OwnershipRequest { input, proof: OwnershipProof::Status },
+        };
+        let nonce = Nonce::new(action.intent(&program_key).unwrap(), user_key.public_key()).unwrap();
+        PrepareRequest {
+            protocol: SIGNING_PROTOCOL.into(),
+            key: program_key,
+            action,
+            user_nonce: hex::encode(nonce.public().serialize()),
+        }
+    }
+
+    // Regression: one unauthenticated wallet filled the entire shared
+    // 256-slot pool and denied every other wallet's prepare.
+    #[test]
+    fn per_wallet_session_cap_is_enforced_without_blocking_other_wallets() {
+        let signer = signer();
+        let alice = ownership_request(0x42);
+        let bob = ownership_request(0x46);
+        assert_ne!(alice.key.user_pubkey, bob.key.user_pubkey);
+
+        let mut sessions = Vec::new();
+        for _ in 0..MAX_SESSIONS_PER_USER {
+            sessions.push(signer.prepare(alice.clone()).unwrap().session);
+        }
+        let error = signer.prepare(alice.clone()).unwrap_err().to_string();
+        assert!(error.contains("per-wallet session capacity exceeded"), "{error}");
+
+        // Another wallet is unaffected while Alice sits at her cap.
+        signer.prepare(bob.clone()).unwrap();
+
+        // Releasing one of Alice's reservations re-admits exactly hers.
+        signer
+            .cancel(CancelRequest {
+                protocol: SIGNING_PROTOCOL.into(),
+                session: sessions.pop().unwrap(),
+            })
+            .unwrap();
+        signer.prepare(alice).unwrap();
+    }
+
+    // The global bound still holds once per-wallet caps spread fills across
+    // MAX_PENDING_SESSIONS / MAX_SESSIONS_PER_USER distinct wallet keys.
+    #[test]
+    fn global_capacity_is_still_enforced_across_distinct_wallets() {
+        let signer = signer();
+        for byte in 0x60u8..0x80 {
+            let request = ownership_request(byte);
+            for _ in 0..MAX_SESSIONS_PER_USER {
+                signer.prepare(request.clone()).unwrap();
+            }
+        }
+        let error = signer.prepare(ownership_request(0x80)).unwrap_err().to_string();
+        assert!(error.contains("signer session capacity exceeded"), "{error}");
     }
 }
