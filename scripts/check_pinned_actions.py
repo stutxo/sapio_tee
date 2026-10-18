@@ -1,8 +1,11 @@
 """Fail if any GitHub Actions `uses:` reference is not pinned to a commit SHA.
 
 Mutable tags can be repointed; a 40-hex commit cannot. Pin with the tag in a
-trailing comment, e.g. `uses: actions/checkout@<sha> # v5`. Local actions
-(`uses: ./...`) are exempt. Exits 1 and lists every violation otherwise.
+trailing comment, e.g. `uses: actions/checkout@<sha> # v5`. Local references
+(`uses: ./...`) are exempt — but composite local action definition files
+(action.yml/action.yaml anywhere in the tree, conventionally .github/actions/)
+can themselves contain `uses:` references, so those files are scanned too.
+Exits 1 and lists every violation otherwise.
 """
 
 import re
@@ -12,10 +15,18 @@ from pathlib import Path
 SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)")
 
+def scan_files():
+    workflows = Path(".github/workflows")
+    if workflows.is_dir():
+        yield from sorted(workflows.glob("*.y*ml"))
+    # Composite action definitions can carry their own `uses:` steps.
+    # rglob also reaches .github/workflows/action.yml; dedupe downstream.
+    yield from sorted(Path(".").rglob("action.yml"))
+    yield from sorted(Path(".").rglob("action.yaml"))
+
 def main() -> int:
-    workflows_dir = Path(".github/workflows")
     failures = []
-    for workflow in sorted(workflows_dir.glob("*.y*ml")):
+    for workflow in dict.fromkeys(scan_files()):
         for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
             match = USES.match(line)
             if not match:
