@@ -20,12 +20,13 @@ def scan_files():
     if workflows.is_dir():
         yield from sorted(workflows.glob("*.y*ml"))
     # Composite action definitions can carry their own `uses:` steps.
+    # rglob also reaches .github/workflows/action.yml; dedupe downstream.
     yield from sorted(Path(".").rglob("action.yml"))
     yield from sorted(Path(".").rglob("action.yaml"))
 
 def main() -> int:
     failures = []
-    for workflow in scan_files():
+    for workflow in dict.fromkeys(scan_files()):
         for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
             match = USES.match(line)
             if not match:
