@@ -58,10 +58,12 @@ def validate_program_profile(profile):
     ark_signing = profile["ark_signing"]
     require(isinstance(ark_signing, dict) and set(ark_signing) == {
         "protocol", "max_pending_sessions", "max_sessions_per_user",
-        "session_lifetime_secs",
+        "session_lifetime_secs", "native_ownership_policy",
     }, "invalid Ark signing profile fields")
     require(ark_signing["protocol"] == "sapio-ark/nested-signing/1",
             "unsupported Ark signing protocol")
+    require(ark_signing["native_ownership_policy"] is True,
+            "native ownership policy enforcement is not advertised")
     for field, expected in (("max_pending_sessions", 256),
                             ("max_sessions_per_user", 8),
                             ("session_lifetime_secs", 120)):
