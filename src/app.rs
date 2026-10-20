@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use tokio::{
     net::TcpListener,
-    sync::{mpsc, Mutex, Semaphore},
+    sync::{mpsc, oneshot, Mutex, Semaphore},
 };
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
@@ -42,7 +42,9 @@ struct Identity {
 
 struct SignerJob {
     oracle: ProgramOracle,
-    listener: TcpListener,
+    /// Reports the result of binding the signer listener on the dedicated
+    /// runtime. The job is only constructed after the root is derived.
+    ready: oneshot::Sender<Result<(), String>>,
 }
 
 struct AppState {
@@ -70,13 +72,22 @@ impl AppState {
             settings,
             signing: program_profile(),
         })?;
-        let listener = TcpListener::bind(SIGNER_ADDRESS).await?;
-        let job = SignerJob { oracle, listener };
-        // No await between handing off the key and publishing its identity:
-        // cancellation cannot leave a half-initialized service.
+        // The signer runs on its own runtime/thread. Its `serve_with_limits`
+        // path executes synchronous WASM work inline, so sharing the HTTP
+        // runtime would let a few slow TCP requests stall health, attestation
+        // and the Ark API. Binding here is deferred to that runtime, and this
+        // method publishes the identity only after the bind succeeds.
+        let (ready, ready_rx) = oneshot::channel();
+        let job = SignerJob { oracle, ready };
         self.work
             .try_send(job)
             .map_err(|_| anyhow!("signer task unavailable"))?;
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(error))) => bail!("signer listener failed: {error}"),
+            Ok(Err(_)) => bail!("signer task stopped before binding"),
+            Err(_) => bail!("signer listener bind timed out"),
+        }
         self.ark_signer
             .set(ark_signer)
             .map_err(|_| anyhow!("Ark signer already initialized"))?;
@@ -269,6 +280,50 @@ fn build_router(state: Arc<AppState>, request_deadline: std::time::Duration) -> 
 
 pub async fn run(nsm: Option<Nsm>) -> Result<()> {
     let (work, mut jobs) = mpsc::channel::<SignerJob>(1);
+    let (done_tx, done_rx) = oneshot::channel::<Result<(), String>>();
+    // The upstream signer transport calls `ProgramOracle::sign` synchronously
+    // inside its async tasks. Keep that CPU-bound work on a dedicated runtime
+    // so it cannot consume the HTTP runtime's workers. The listener is bound
+    // on this runtime as well, because Tokio I/O resources are reactor-bound.
+    std::thread::Builder::new()
+        .name("program-oracle".into())
+        .spawn(move || {
+            let result = (|| -> Result<()> {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .context("could not build signer runtime")?;
+                runtime.block_on(async move {
+                    let SignerJob { oracle, ready } = jobs
+                        .recv()
+                        .await
+                        .context("signer initialization channel closed")?;
+                    let listener = match TcpListener::bind(SIGNER_ADDRESS).await {
+                        Ok(listener) => listener,
+                        Err(error) => {
+                            let _ = ready.send(Err(error.to_string()));
+                            return Err(error.into());
+                        }
+                    };
+                    if ready.send(Ok(())).is_err() {
+                        bail!("signer readiness receiver dropped");
+                    }
+                    // Admission bounds concurrent requests, not native
+                    // compilation wall time; that work stays on this runtime.
+                    oracle
+                        .serve_with_limits(
+                            listener,
+                            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+                            MAX_CONNECTIONS,
+                        )
+                        .await?;
+                    bail!("signer exited unexpectedly")
+                })
+            })();
+            let _ = done_tx.send(result.map_err(|error| error.to_string()));
+        })
+        .context("could not spawn signer thread")?;
     let state = Arc::new(AppState {
         identity: OnceLock::new(),
         ark_signer: OnceLock::new(),
@@ -295,24 +350,16 @@ pub async fn run(nsm: Option<Nsm>) -> Result<()> {
     );
     let listener = TcpListener::bind(API_ADDRESS).await?;
     eprintln!("sapio-tee API listening on {API_ADDRESS}; ProgramOracle port {SIGNER_ADDRESS}");
-    let signer = async move {
-        let job = jobs
-            .recv()
-            .await
-            .context("signer initialization channel closed")?;
-        // Admission bounds concurrent requests, not native compilation wall time.
-        job.oracle
-            .serve_with_limits(
-                job.listener,
-                std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
-                MAX_CONNECTIONS,
-            )
-            .await?;
-        bail!("signer exited unexpectedly")
+    let signer_done = async move {
+        match done_rx.await {
+            Ok(Ok(())) => bail!("signer exited unexpectedly"),
+            Ok(Err(error)) => bail!("signer failed: {error}"),
+            Err(_) => bail!("signer task ended without status"),
+        }
     };
     tokio::select! {
         result = axum::serve(listener, router) => { result?; bail!("API exited unexpectedly"); }
-        result = signer => result,
+        result = signer_done => result,
         result = shutdown() => result,
     }
 }
