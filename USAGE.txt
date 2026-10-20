@@ -206,8 +206,9 @@ After the initial Terraform init and configuration, terraform apply performs:
    per-instance command's exit status, service health and matching public
    identity. Bootstrap, KMS/setup, timeout or identity errors fail apply.
 
-This remains ONE EC2 box, with no NAT gateway, load balancer or Elastic IP.
-The added S3 bucket and KMS key incur their normal small storage/key charges.
+This remains ONE EC2 box, with no NAT gateway or load balancer, plus a stable
+Elastic IP for a stable public address. The added S3 bucket, KMS key and any
+Route53 zone/record incur their normal small charges.
 Only SSH is admitted from your IPv4 /32; both the security group and IPv4/IPv6
 host firewall block direct signer-port access. Deployment uses S3/Systems
 Manager, not SSH provisioners: Terraform never needs an SSH private key.
@@ -215,7 +216,7 @@ The EC2 role has only this bucket's GetObject permission, the AWS-managed SSM
 core policy, and the specific attested KMS grant; it is not the administrator.
 
 Prerequisites:
-- An x86_64 Linux workstation with Nix, Python >= 3.9, Terraform >= 1.7 and < 2,
+- An x86_64 Linux workstation with Nix, Python >= 3.9, Terraform >= 1.10 and < 2,
   AWS CLI v2, and normal locally configured AWS credentials (e.g. AWS_PROFILE).
   No manual nix build, scp, key-policy upload or SSH launch is needed.
   Export TEE_SOURCE to the reviewed code-only TEE snapshot before Terraform
@@ -278,6 +279,25 @@ re-derivable. terraform destroy does not touch the state bucket; empty it
 explicitly (it is versioned) if you ever retire the deployment. No private
 root, KMS key material, AWS credentials or SSH private keys are Terraform inputs.
 The public setup record and key ARN are state/output data.
+
+DNS (sapio.sh)
+--------------
+The domain is registered at Namecheap; Route53 can host it. On the first
+apply in the zone-owning account set manage_dns_zone = true (and optionally
+dns_record_name, default tee). Apply and read the delegated name servers:
+
+  terraform -chdir=deploy/terraform output -json dns_name_servers
+
+At Namecheap, set those four values as the domain's Custom DNS servers. Later
+deployments should set manage_dns_zone = false and dns_zone_id = "Z..." so they
+reuse the one zone; each can create its own dns_record_name. The zone has
+prevent_destroy; delete it deliberately only after removing records.
+
+The A record points at the deployment's stable Elastic IP. It is HTTP-only:
+there is no TLS, request authentication, or attestation binding of a browser
+session. A public DNS name does not make the enclave API safe to expose. Keep
+8000/8367 private behind a reviewed authenticated TLS proxy (or use only
+tunnels/VPN) unless this is a valueless test network.
 
 After deployment, save the public recovery inputs:
 
