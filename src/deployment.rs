@@ -15,6 +15,9 @@ pub struct ArkSigningProfile {
     pub max_pending_sessions: usize,
     pub max_sessions_per_user: usize,
     pub session_lifetime_secs: u64,
+    /// The signer enforces the optional native ownership policy envelope
+    /// before releasing an Ark Ownership partial.
+    pub native_ownership_policy: bool,
 }
 
 pub const IDENTITY_PROTOCOL: &str = "sapio-tee/program-oracle/1";
@@ -94,6 +97,7 @@ pub fn program_profile() -> ProgramProfile {
             max_pending_sessions: MAX_PENDING_SESSIONS,
             max_sessions_per_user: MAX_SESSIONS_PER_USER,
             session_lifetime_secs: SESSION_LIFETIME_SECS,
+            native_ownership_policy: true,
         },
     }
 }

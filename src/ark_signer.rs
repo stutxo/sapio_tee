@@ -7,6 +7,7 @@
 //! a transaction before the wallet's durable-recovery barrier.
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use crate::native_policy;
 use ark::musig::nested::{Intent, MemberNonce, Nonce, Session};
 use ark::sapio::protocol::{
     parse_nonce, parse_partial, CancelRequest, FinishRequest, FinishResponse, PrepareRequest,
@@ -81,6 +82,13 @@ impl ArkSigner {
                 == intent.members[1],
             "program public-key derivation mismatch"
         );
+        // A policy envelope is committed by the program parameters/id. Parse it
+        // for every action so a malformed envelope fails closed, and require an
+        // inline WASM program that can tolerate the envelope for Spend.
+        let native_policy = native_policy::parse(program.parameters())?;
+        if native_policy.is_some() && program.evaluator().inline_wasm_version().is_none() {
+            bail!("native ownership policy requires an inline WASM program");
+        }
 
         match &request.action {
             SigningAction::Spend { request: spend } => {
@@ -91,8 +99,13 @@ impl ArkSigner {
             }
             SigningAction::Ownership { request: ownership } => {
                 // These fixed native domains are not Bitcoin signature hashes.
-                // Their complete request is bound by the native message function;
-                // only a later, separately evaluated spend can transfer coins.
+                // Their complete request is bound by the native message function.
+                // A later evaluated spend gates settlement but does not contain
+                // every native destination, so an opted-in program policy is
+                // enforced here before S releases its partial.
+                if let Some(policy) = native_policy.as_ref() {
+                    policy.enforce(&ownership.proof)?;
+                }
                 ensure!(
                     ownership.message(&request.key)?.as_ref() == &intent.message,
                     "ownership request differs from the nested signing intent"
@@ -181,6 +194,7 @@ mod tests {
     use crate::deployment::{PAY_AT_LEAST_SELECTOR, PAY_AT_LEAST_WASM};
     use ark::musig::{self, context::SigningInput, PartialSignature};
     use ark::sapio::program::{Program, ProgramKey};
+    use ark::offboard::OffboardRequest;
     use ark::sapio::protocol::SpendRequest;
     use ark::vtxo::{policy::check_block_delta, PubkeyVtxoPolicy, TapScriptClause};
     use bitcoin::bip32::Xpub;
@@ -190,14 +204,14 @@ mod tests {
     use bitcoin::sighash::{Prevouts, SighashCache};
     use bitcoin::taproot::{LeafVersion, TapLeafHash};
     use bitcoin::{
-        absolute, transaction, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction,
-        TapSighashType, TxIn, TxOut, Txid,
+        absolute, transaction, Amount, FeeRate, Network, OutPoint, ScriptBuf, Sequence,
+        Transaction, TapSighashType, TxIn, TxOut, Txid,
     };
     use std::sync::Barrier;
     use std::thread;
 
     use ark::sapio::protocol::{OwnershipProof, OwnershipRequest};
-    use ark::{ProtocolEncoding, Vtxo, VtxoPolicy};
+    use ark::{ProtocolEncoding, SignedVtxoRequest, Vtxo, VtxoPolicy, VtxoRequest};
 
     // These are the existing source-built predicates, not approval callbacks.
     // Their source, ABI and binary provenance live beside the example artifacts.
@@ -1085,10 +1099,10 @@ mod tests {
 
     // A protocol-valid Ownership(Status) preparation reaches the reservation
     // logic without any WASM evaluation, so it is the cheapest possible fill.
-    fn ownership_request(user: u8) -> PrepareRequest {
+    fn ownership_fixture(program: Program, user: u8) -> (ProgramKey, Vtxo, Keypair) {
         let user_key = key(user);
         let program_key = ProgramKey {
-            program: payment_program(),
+            program,
             root: Xpub::from_priv(&ark::SECP, &root()),
             user_pubkey: user_key.public_key(),
         };
@@ -1104,15 +1118,51 @@ mod tests {
             point,
         );
         let input: Vtxo = Vtxo::deserialize(&bare.serialize()).unwrap();
+        (program_key, input, user_key)
+    }
+
+    fn ownership_prepare(
+        program_key: &ProgramKey,
+        input: &Vtxo,
+        proof: OwnershipProof,
+        user_key: &Keypair,
+    ) -> PrepareRequest {
         let action = SigningAction::Ownership {
-            request: OwnershipRequest { input, proof: OwnershipProof::Status },
+            request: OwnershipRequest { input: input.clone(), proof },
         };
-        let nonce = Nonce::new(action.intent(&program_key).unwrap(), user_key.public_key()).unwrap();
+        let nonce = Nonce::new(action.intent(program_key).unwrap(), user_key.public_key()).unwrap();
         PrepareRequest {
             protocol: SIGNING_PROTOCOL.into(),
-            key: program_key,
+            key: program_key.clone(),
             action,
             user_nonce: hex::encode(nonce.public().serialize()),
+        }
+    }
+
+    fn ownership_request(user: u8) -> PrepareRequest {
+        let (program_key, input, user_key) = ownership_fixture(payment_program(), user);
+        ownership_prepare(&program_key, &input, OwnershipProof::Status, &user_key)
+    }
+
+    fn policy_program(document: serde_json::Value, inner: &[u8]) -> Program {
+        let document = serde_json::to_vec(&document).unwrap();
+        let parameters = native_policy::encode(&document, inner);
+        Program::new(
+            EvaluatorId::wasm().0,
+            TEMPLATEHASH.to_vec(),
+            parameters,
+        ).unwrap()
+    }
+
+    fn offboard_proof(input: &Vtxo, script: ScriptBuf) -> OwnershipProof {
+        OwnershipProof::Offboard {
+            request: OffboardRequest {
+                script_pubkey: script,
+                net_amount: Amount::from_sat(FUNDING),
+                deduct_fees_from_gross_amount: false,
+                fee_rate: FeeRate::from_sat_per_vb(1).expect("valid fee rate"),
+            },
+            inputs: vec![input.id()],
         }
     }
 
@@ -1158,5 +1208,141 @@ mod tests {
         }
         let error = signer.prepare(ownership_request(0x80)).unwrap_err().to_string();
         assert!(error.contains("signer session capacity exceeded"), "{error}");
+    }
+
+    #[test]
+    fn native_policy_binds_offboard_destination() {
+        let allowed = recipient(0x45);
+        let denied = recipient(0x46);
+        let program = policy_program(serde_json::json!({
+            "version": 1,
+            "offboard": [native_policy::script_hex(&allowed)],
+            "arkoor": [],
+            "round": [],
+            "delegated_round": [],
+            "status": true,
+            "lightning_receive": false,
+        }), b"");
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let accepted = ownership_prepare(
+            &program_key, &input, offboard_proof(&input, allowed), &user_key,
+        );
+        signer.prepare(accepted).unwrap();
+
+        let rejected = ownership_prepare(
+            &program_key, &input, offboard_proof(&input, denied), &user_key,
+        );
+        let error = signer.prepare(rejected).unwrap_err().to_string();
+        assert!(error.contains("offboard destination"), "{error}");
+    }
+
+    #[test]
+    fn native_policy_binds_delegated_round_outputs() {
+        let allowed = VtxoPolicy::new_pubkey(key(0x47).public_key());
+        let denied = VtxoPolicy::new_pubkey(key(0x48).public_key());
+        let program = policy_program(serde_json::json!({
+            "version": 1,
+            "delegated_round": [native_policy::policy_hex(&allowed)],
+            "status": true,
+        }), b"");
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let proof = |policy| OwnershipProof::DelegatedRound {
+            outputs: vec![VtxoRequest { amount: Amount::from_sat(1_000), policy }],
+        };
+        signer.prepare(ownership_prepare(
+            &program_key, &input, proof(allowed), &user_key,
+        )).unwrap();
+        let error = signer.prepare(ownership_prepare(
+            &program_key, &input, proof(denied), &user_key,
+        )).unwrap_err().to_string();
+        assert!(error.contains("delegated-round output policy"), "{error}");
+    }
+
+    #[test]
+    fn native_policy_binds_round_outputs() {
+        let allowed = VtxoPolicy::new_pubkey(key(0x47).public_key());
+        let denied = VtxoPolicy::new_pubkey(key(0x48).public_key());
+        let program = policy_program(serde_json::json!({
+            "version": 1,
+            "round": [native_policy::policy_hex(&allowed)],
+            "status": true,
+        }), b"");
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let proof = |policy| OwnershipProof::Round {
+            challenge: [0x55; 32],
+            outputs: vec![SignedVtxoRequest {
+                vtxo: VtxoRequest { amount: Amount::from_sat(1_000), policy },
+                cosign_pubkey: key(0x49).public_key(),
+                nonces: vec![],
+            }],
+        };
+        signer.prepare(ownership_prepare(
+            &program_key, &input, proof(allowed), &user_key,
+        )).unwrap();
+        let error = signer.prepare(ownership_prepare(
+            &program_key, &input, proof(denied), &user_key,
+        )).unwrap_err().to_string();
+        assert!(error.contains("round output policy"), "{error}");
+    }
+
+    #[test]
+    fn native_policy_is_default_deny_for_status() {
+        let program = policy_program(serde_json::json!({
+            "version": 1,
+            "status": false,
+        }), b"");
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let error = signer.prepare(ownership_prepare(
+            &program_key, &input, OwnershipProof::Status, &user_key,
+        )).unwrap_err().to_string();
+        assert!(error.contains("does not allow status"), "{error}");
+    }
+
+    #[test]
+    fn malformed_native_policy_fails_closed() {
+        let mut parameters = native_policy::MAGIC.to_vec();
+        parameters.extend_from_slice(&[1, 0]);
+        let program = Program::new(
+            EvaluatorId::wasm().0, TEMPLATEHASH.to_vec(), parameters,
+        ).unwrap();
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let error = signer.prepare(ownership_prepare(
+            &program_key, &input, OwnershipProof::Status, &user_key,
+        )).unwrap_err().to_string();
+        assert!(error.contains("native ownership policy"), "{error}");
+    }
+
+    #[test]
+    fn native_policy_requires_inline_wasm_program() {
+        let document = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "status": true,
+        })).unwrap();
+        let parameters = native_policy::encode(&document, b"");
+        let program = Program::new(
+            EvaluatorId::for_wasm(PAY_AT_LEAST_WASM).0,
+            PAY_AT_LEAST_SELECTOR.to_vec(),
+            parameters,
+        ).unwrap();
+        let signer = signer();
+        let (program_key, input, user_key) = ownership_fixture(program, 0x42);
+        let error = signer.prepare(ownership_prepare(
+            &program_key, &input, OwnershipProof::Status, &user_key,
+        )).unwrap_err().to_string();
+        assert!(error.contains("inline WASM"), "{error}");
+    }
+
+    #[test]
+    fn signed_delayed_claim_verifies_after_signer_is_dropped() {
+        let signer = signer();
+        let fixture = Fixture::template(true);
+        let signature = fixture.sign(&signer);
+        drop(signer);
+        fixture.verify(&signature);
     }
 }

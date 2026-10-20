@@ -102,6 +102,7 @@ class AttestationVerification(unittest.TestCase):
                 "max_pending_sessions": 256,
                 "max_sessions_per_user": 8,
                 "session_lifetime_secs": 120,
+                "native_ownership_policy": True,
             },
         }
         cls.identity = {"protocol": "sapio-tee/program-oracle/1", "mode": "nitro",
@@ -218,6 +219,9 @@ class AttestationVerification(unittest.TestCase):
             expected | {"session_lifetime_secs": 120.0},
             expected | {"session_lifetime_secs": "120"},
             expected | {"raw_digest_signing": True},
+            expected | {"native_ownership_policy": False},
+            expected | {"native_ownership_policy": 1},
+            expected | {"native_ownership_policy": "true"},
         ]
         invalid_contracts.extend(
             {key: value for key, value in expected.items() if key != missing}

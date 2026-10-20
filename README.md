@@ -203,8 +203,9 @@ Build `result-app` with `nix build --no-update-lock-file "$TEE_FLAKE#app" --out-
 
 The expected profile must include `ark_signing` with protocol
 `sapio-ark/nested-signing/1`, integer `max_pending_sessions: 256`, integer
-`max_sessions_per_user: 8`, and integer
-`session_lifetime_secs: 120`. The verifier rejects missing or extra fields,
+`max_sessions_per_user: 8`, integer `session_lifetime_secs: 120`, and
+`native_ownership_policy: true`. The verifier rejects missing or extra fields,
+false capability flags,
 different protocols, and different limits. The example identity loader compares
 the complete profile to its own reviewed build, including this contract. The
 contract requires both user and TEE keys, with program evaluation and the TEE key
@@ -271,6 +272,42 @@ Bark must durably save and independently verify its program-authorized recovery
 before it hands off funding, cooperative signatures or a receive preimage.
 An exact TemplateHash program can reject intermediate Ark shapes. Rejection
 must stop that operation, not fall back to an unrestricted key or exemption.
+
+### Native ownership policy and offline exits
+
+The generic WASM evaluator sees Bitcoin spends, not the native offboard
+destination or round output policies. A program that needs destination binding
+for cooperative offboard/round can opt in by prefixing its parameters with
+`sapio-tee/native-ownership/v1`:
+
+```text
+MAGIC || u32_le(document_len) || JSON(document) || inner_program_parameters
+```
+
+```json
+{"version":1,
+ "offboard":["<hex scriptPubKey>"],
+ "arkoor":["<hex VtxoPolicy>"],
+ "round":["<hex VtxoPolicy>"],
+ "delegated_round":["<hex VtxoPolicy>"],
+ "status":true,
+ "lightning_receive":false}
+```
+
+Every value-moving variant is default-deny; all outputs must match an allowed
+policy and offboard must match an allowed script. The envelope is part of
+`ProgramInstance::id()` and the program-derived key. Only an inline WASM program
+can use it, because its bytes receive the parameters; the program must ignore
+the envelope or parse the trailing inner parameters. A malformed envelope fails
+closed. The attested `ark_signing` profile advertises
+`native_ownership_policy: true`.
+
+This is an online cooperative-flow check. For an offline escape, the client must
+also pre-sign the delayed-claim Bitcoin transaction: complete the `S` partial
+with the user key locally and store the final signed tx plus its prevout. That
+exit remains broadcastable with the TEE offline, but any VTXO refresh or state
+change invalidates it, so create a fresh one for each state. A stored native
+ownership signature is not a substitute for a stored Bitcoin exit transaction.
 
 ## Security boundaries
 
