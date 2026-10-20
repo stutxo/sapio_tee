@@ -5,6 +5,8 @@ trailing comment, e.g. `uses: actions/checkout@<sha> # v5`. Local references
 (`uses: ./...`) are exempt — but composite local action definition files
 (action.yml/action.yaml anywhere in the tree, conventionally .github/actions/)
 can themselves contain `uses:` references, so those files are scanned too.
+Quoted keys and flow mappings (`- {"uses": ...}`, `- "uses": ...`, `uses :`)
+are the same YAML property and are scanned too.
 Exits 1 and lists every violation otherwise.
 """
 
@@ -13,7 +15,12 @@ import sys
 from pathlib import Path
 
 SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
-USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)")
+USES = re.compile(
+    r"""^\s*-?\s*(?:\{\s*)?["']?uses["']?\s*:\s*["']?([^\s"'#},]+)"""
+)
+# Any other spelling of the `uses` key that the matcher above did not consume
+# must fail closed rather than being silently skipped.
+USES_SHAPE = re.compile(r"""(?i)(?:^|[\s{,])["']?uses["']?\s*:""")
 
 def scan_files():
     workflows = Path(".github/workflows")
@@ -32,7 +39,7 @@ def main() -> int:
             if not match:
                 # Fail closed on any uses: shape the regex cannot parse rather
                 # than silently skipping it.
-                if "uses:" in line and not line.lstrip().startswith("#"):
+                if USES_SHAPE.search(line) and not line.lstrip().startswith("#"):
                     failures.append(f"{workflow}:{line_number}: unparsable uses: line {line.strip()!r}")
                 continue
             reference = match.group(1)
