@@ -14,7 +14,7 @@ local-dev = []
 
 [dependencies]
 anyhow = "1"
-ark-lib = { git = "https://github.com/stutxo/saplingos", rev = "c3d1981e7d770addbb6f6ad632390c1a20470bc0" }
+ark-lib = { git = "https://github.com/stutxo/saplingos", rev = "758f7b730" }
 aws-nitro-enclaves-nsm-api = "0.4"
 aws-sdk-kms = "1"
 axum = "0.8"

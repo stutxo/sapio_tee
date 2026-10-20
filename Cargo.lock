@@ -71,7 +71,7 @@ dependencies = [
 [[package]]
 name = "ark-lib"
 version = "0.7.1"
-source = "git+https://github.com/stutxo/saplingos?rev=c3d1981e7d770addbb6f6ad632390c1a20470bc0#c3d1981e7d770addbb6f6ad632390c1a20470bc0"
+source = "git+https://github.com/stutxo/saplingos?rev=758f7b730#758f7b730c5712156b2a5af5b2dc0160ef9d15d7"
 dependencies = [
  "async-trait",
  "bark-bitcoin-ext",
@@ -495,7 +495,7 @@ dependencies = [
 [[package]]
 name = "bark-bitcoin-ext"
 version = "0.7.1"
-source = "git+https://github.com/stutxo/saplingos?rev=c3d1981e7d770addbb6f6ad632390c1a20470bc0#c3d1981e7d770addbb6f6ad632390c1a20470bc0"
+source = "git+https://gitlab.com/ark-bitcoin/bark.git?rev=626c9b241dd25d73212915d8fca959ab5e3b8f1f#626c9b241dd25d73212915d8fca959ab5e3b8f1f"
 dependencies = [
  "bitcoin",
  "lazy_static",
