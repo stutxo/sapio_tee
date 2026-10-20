@@ -129,7 +129,15 @@ def initialize(settings, url, timeout):
                     status, body = request("/setup", payload)
                     if status == 200:
                         identity = validate_identity(body, settings)
-                    elif status in (409, 502):
+                    elif status in (408, 409, 502):
+                        # 408 means the HTTP deadline fired while the enclave
+                        # may still be completing KMS setup. Retry: the next
+                        # /setup attempt observes 409 if it is still in
+                        # progress, or /public-key observes the finished
+                        # identity. Treating it as fatal would make systemd
+                        # restart the service and discard the in-flight
+                        # enclave whenever KMS is slower than the HTTP
+                        # deadline.
                         last_status = f"/setup returned HTTP {status}"
                     else:
                         unexpected("/setup", status, body)
