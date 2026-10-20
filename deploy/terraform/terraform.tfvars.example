@@ -20,3 +20,12 @@ kms_admin_role_arn = "arn:aws:iam::123456789012:role/REPLACE"
 # network = "bitcoin" is refused here; use the manual procedure in USAGE.txt.
 network   = "regtest"
 blockhash = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
+
+# Optional Route53 for sapio.sh (registered at Namecheap).
+# First apply in the zone-owning account: set manage_dns_zone = true, apply,
+# then set the output dns_name_servers as Custom DNS at Namecheap.
+# Later deployments: set manage_dns_zone = false and dns_zone_id = "Z...".
+# The A record points at the stable Elastic IP; it does not add TLS or auth.
+manage_dns_zone = true
+dns_zone_id     = ""
+dns_record_name = "tee"
